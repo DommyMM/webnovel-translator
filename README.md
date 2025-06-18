@@ -117,6 +117,65 @@ The system automatically learns rules like:
 - Backend: FastAPI for API services
 - Frontend: Next.js for translation interface
 
+## Development Environment Setup (WSL2 + CUDA 12.8)
+
+This project is developed on Windows 11 using WSL2 with GPU acceleration via CUDA 12.8 and the NVIDIA RTX 5090. The backend stack runs in a Linux virtual environment, with code stored on the Windows filesystem.
+
+### System Requirements
+- Windows 11 with WSL2 enabled
+- NVIDIA GPU (e.g., RTX 5090) with latest WSL-compatible drivers
+- Ubuntu 24.04 LTS installed via WSL
+- Python 3.12
+- CUDA Toolkit 12.8 (WSL version)
+
+### Installation Steps
+```bash
+# 1. Install system dependencies
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y build-essential curl wget git vim software-properties-common
+sudo apt install -y python3.12 python3.12-venv python3.12-dev python3-pip
+
+# 2. Install CUDA 12.8 toolkit for WSL
+wget https://developer.download.nvidia.com/compute/cuda/repos/wsl-ubuntu/x86_64/cuda-keyring_1.1-1_all.deb
+sudo dpkg -i cuda-keyring_1.1-1_all.deb
+sudo apt update
+sudo apt install -y cuda-toolkit-12-8 cuda-compiler-12-8
+
+# Add CUDA to PATH
+echo 'export PATH=/usr/local/cuda-12.8/bin:$PATH' >> ~/.bashrc
+echo 'export LD_LIBRARY_PATH=/usr/local/cuda-12.8/lib64:$LD_LIBRARY_PATH' >> ~/.bashrc
+source ~/.bashrc
+
+# 3. Verify GPU access
+nvidia-smi
+nvcc --version
+```
+
+### Virtual Environment and Package Setup
+```bash
+# 1. Install `uv` (fast package manager)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source ~/.bashrc
+
+# 2. Create virtual environment in Linux FS
+mkdir -p ~/venvs/webnovel && cd ~/venvs/webnovel
+uv venv vllm_env --python 3.12
+source vllm_env/bin/activate
+
+# 3. Install PyTorch with CUDA 12.8
+uv pip install --upgrade pip
+uv pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+
+# 4. Confirm GPU support
+python -c "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
+
+# 5. Install RAG and backend dependencies
+uv pip install faiss-cpu sentence-transformers langchain langchain-community pandas numpy huggingface-hub fastapi uvicorn ipython jupyter vllm
+
+# Note: faiss-gpu is not yet available for Python 3.12.
+# Using faiss-cpu for now, can recreate with Python 3.10 if needed.
+```
+
 ## Project Structure
 ```
 /backend          # FastAPI server, LLM inference, RAG pipeline
