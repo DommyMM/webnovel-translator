@@ -1,6 +1,7 @@
 import os
 import time
 import json
+import re
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -115,6 +116,10 @@ Chinese text to translate:
             )
             
             translation = response.choices[0].message.content
+            
+            # Clean up thinking tags from Qwen output
+            translation = re.sub(r'<think>.*?</think>', '', translation, flags=re.DOTALL).strip()
+            
             translation_time = time.time() - start_time
             
             # Calculate performance metrics
