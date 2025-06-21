@@ -2,11 +2,13 @@ import os
 import time
 import json
 import re
+import argparse
+import asyncio
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional
 from dataclasses import dataclass, asdict
-from openai import OpenAI
+from openai import AsyncOpenAI
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -41,32 +43,30 @@ class EvaluationConfig:
     evaluator_model: str = "deepseek-chat"
     temperature: float = 0.2  # Low temp for consistent, objective scoring
     max_tokens: int = 2048
-    # For DeepSeek API
     base_url: str = "https://api.deepseek.com"
+    max_concurrent: int = 3  # Limit concurrent evaluations
 
-class TranslationEvaluator:     # Objective evaluation system for translation quality improvement
+class AsyncChapterEvaluator:
+    """Evaluate translations for a single chapter asynchronously"""
     
-    def __init__(self, config: EvaluationConfig):
+    def __init__(self, config: EvaluationConfig, chapter_num: int):
         self.config = config
-        
-        # Use DeepSeek for evaluation with different settings for objectivity
-        self.client = OpenAI(
+        self.chapter_num = chapter_num
+        self.client = AsyncOpenAI(
             api_key=os.getenv("DEEPSEEK_API_KEY"),
             base_url=self.config.base_url
         )
-        
         self.setup_directories()
-        self.evaluation_metrics: List[EvaluationMetrics] = []
-    
+        
     def setup_directories(self):
         Path(self.config.evaluation_output_dir).mkdir(exist_ok=True)
         for subdir in ["scores", "comparisons", "analytics", "reports"]:
             Path(self.config.evaluation_output_dir, subdir).mkdir(exist_ok=True)
     
-    def load_translations(self, chapter_num: int) -> tuple[str, str, str]:       # Load baseline, enhanced, and ground truth translations
+    def load_translations(self) -> tuple[str, str, str]:       # Load baseline, enhanced, and ground truth translations
         
         # Load baseline translation (DeepSeek raw)
-        baseline_file = Path(self.config.baseline_results_dir, "translations", f"chapter_{chapter_num:04d}_deepseek.txt")
+        baseline_file = Path(self.config.baseline_results_dir, "translations", f"chapter_{self.chapter_num:04d}_deepseek.txt")
         if not baseline_file.exists():
             raise FileNotFoundError(f"Baseline translation not found: {baseline_file}")
         
@@ -78,7 +78,7 @@ class TranslationEvaluator:     # Objective evaluation system for translation qu
                 baseline_text = '\n'.join(lines[2:]).strip()
         
         # Load enhanced translation (with rules applied)
-        enhanced_file = Path(self.config.enhanced_results_dir, "translations", f"chapter_{chapter_num:04d}_enhanced.txt")
+        enhanced_file = Path(self.config.enhanced_results_dir, "translations", f"chapter_{self.chapter_num:04d}_enhanced.txt")
         if not enhanced_file.exists():
             raise FileNotFoundError(f"Enhanced translation not found: {enhanced_file}")
         
@@ -90,7 +90,7 @@ class TranslationEvaluator:     # Objective evaluation system for translation qu
                 enhanced_text = '\n'.join(lines[3:]).strip()  # Skip title, rules count, empty line
         
         # Load professional ground truth (100% baseline)
-        truth_file = Path(self.config.ground_truth_dir, f"chapter_{chapter_num:04d}_en.txt")
+        truth_file = Path(self.config.ground_truth_dir, f"chapter_{self.chapter_num:04d}_en.txt")
         if not truth_file.exists():
             raise FileNotFoundError(f"Ground truth not found: {truth_file}")
         
@@ -156,13 +156,13 @@ COMMENTS: [2-3 sentences about what works well or needs improvement for reader e
     
         return prompt
     
-    def evaluate_translation(self, translation: str, ground_truth: str, translation_type: str) -> Dict:      # Get AI evaluation scores for a translation
+    async def evaluate_translation_async(self, translation: str, ground_truth: str, translation_type: str) -> Dict:      # Get AI evaluation scores for a translation asynchronously
         
         start_time = time.time()
         prompt = self.create_evaluation_prompt(translation, ground_truth, translation_type)
         
         try:
-            response = self.client.chat.completions.create(
+            response = await self.client.chat.completions.create(
                 model=self.config.evaluator_model,
                 messages=[
                     {"role": "system", "content": "You are an expert evaluator of English translations for Western readers. Rate translations objectively based on readability and enjoyment for the target audience."},
@@ -183,7 +183,7 @@ COMMENTS: [2-3 sentences about what works well or needs improvement for reader e
             return scores
             
         except Exception as e:
-            print(f"Evaluation failed for {translation_type}: {str(e)}")
+            print(f"Chapter {self.chapter_num}: Evaluation failed for {translation_type}: {str(e)}")
             return {
                 "overall_score": 0,
                 "flow_score": 0,
@@ -227,68 +227,61 @@ COMMENTS: [2-3 sentences about what works well or needs improvement for reader e
         
         return scores
     
-    def evaluate_chapter(self, chapter_num: int) -> EvaluationMetrics:       # Evaluate both baseline and enhanced translations for a chapter
-        
-        print(f"\nEvaluating Chapter {chapter_num}")
-        print("-" * 50)
-        
-        try:
-            # Load all translations
-            baseline_text, enhanced_text, ground_truth = self.load_translations(chapter_num)
-            print(f"Loaded translations - Baseline: {len(baseline_text)} chars, Enhanced: {len(enhanced_text)} chars")
+    async def evaluate_chapter_async(self, semaphore: asyncio.Semaphore) -> Optional[EvaluationMetrics]:       # Evaluate both baseline and enhanced translations for a chapter asynchronously
+        async with semaphore:  # Limit concurrent requests
+            print(f"Starting Chapter {self.chapter_num} evaluation...")
             
-            # Evaluate baseline translation
-            print("Evaluating baseline translation...")
-            baseline_eval = self.evaluate_translation(baseline_text, ground_truth, "baseline")
-            
-            # Evaluate enhanced translation  
-            print("Evaluating enhanced translation...")
-            enhanced_eval = self.evaluate_translation(enhanced_text, ground_truth, "enhanced")
-            
-            # Calculate improvement
-            improvement = enhanced_eval["overall_score"] - baseline_eval["overall_score"]
-            
-            # Create metrics object
-            metrics = EvaluationMetrics(
-                chapter_num=chapter_num,
-                baseline_score=baseline_eval["overall_score"],
-                enhanced_score=enhanced_eval["overall_score"],
-                improvement=improvement,
-                flow_score=enhanced_eval["flow_score"],
-                character_voice_score=enhanced_eval["character_score"],
-                clarity_score=enhanced_eval["clarity_score"],
-                genre_score=enhanced_eval["genre_score"],
-                evaluator_comments=enhanced_eval["comments"],
-                evaluation_time=baseline_eval["evaluation_time"] + enhanced_eval["evaluation_time"],
-                timestamp=datetime.now().isoformat()
-            )
-            
-            # Save detailed results
-            self.save_chapter_evaluation(chapter_num, baseline_eval, enhanced_eval, metrics, 
-                                       baseline_text, enhanced_text, ground_truth)
-            
-            self.evaluation_metrics.append(metrics)
-            
-            # Show results
-            print(f"Results for Chapter {chapter_num}:")
-            print(f"  Baseline Score: {baseline_eval['overall_score']}%")
-            print(f"  Enhanced Score: {enhanced_eval['overall_score']}%") 
-            print(f"  Improvement: {improvement:+.1f} points")
-            print(f"  Enhanced Comments: {enhanced_eval['comments'][:100]}...")
-            
-            return metrics
-            
-        except Exception as e:
-            print(f"Error evaluating chapter {chapter_num}: {e}")
-            return None
+            try:
+                # Load all translations
+                baseline_text, enhanced_text, ground_truth = self.load_translations()
+                print(f"Chapter {self.chapter_num}: Loaded translations - Baseline: {len(baseline_text)} chars, Enhanced: {len(enhanced_text)} chars")
+                
+                # Evaluate baseline translation
+                print(f"Chapter {self.chapter_num}: Evaluating baseline translation...")
+                baseline_eval = await self.evaluate_translation_async(baseline_text, ground_truth, "baseline")
+                
+                # Evaluate enhanced translation  
+                print(f"Chapter {self.chapter_num}: Evaluating enhanced translation...")
+                enhanced_eval = await self.evaluate_translation_async(enhanced_text, ground_truth, "enhanced")
+                
+                # Calculate improvement
+                improvement = enhanced_eval["overall_score"] - baseline_eval["overall_score"]
+                
+                # Create metrics object
+                metrics = EvaluationMetrics(
+                    chapter_num=self.chapter_num,
+                    baseline_score=baseline_eval["overall_score"],
+                    enhanced_score=enhanced_eval["overall_score"],
+                    improvement=improvement,
+                    flow_score=enhanced_eval["flow_score"],
+                    character_voice_score=enhanced_eval["character_score"],
+                    clarity_score=enhanced_eval["clarity_score"],
+                    genre_score=enhanced_eval["genre_score"],
+                    evaluator_comments=enhanced_eval["comments"],
+                    evaluation_time=baseline_eval["evaluation_time"] + enhanced_eval["evaluation_time"],
+                    timestamp=datetime.now().isoformat()
+                )
+                
+                # Save detailed results
+                self.save_chapter_evaluation(baseline_eval, enhanced_eval, metrics, 
+                                           baseline_text, enhanced_text, ground_truth)
+                
+                # Show completion
+                print(f"Chapter {self.chapter_num} complete: Baseline {baseline_eval['overall_score']}% → Enhanced {enhanced_eval['overall_score']}% ({improvement:+.1f})")
+                
+                return metrics
+                
+            except Exception as e:
+                print(f"Chapter {self.chapter_num}: Error evaluating: {e}")
+                return None
     
-    def save_chapter_evaluation(self, chapter_num: int, baseline_eval: Dict, enhanced_eval: Dict, 
+    def save_chapter_evaluation(self, baseline_eval: Dict, enhanced_eval: Dict, 
                                metrics: EvaluationMetrics, baseline_text: str, enhanced_text: str, ground_truth: str):      # Save detailed evaluation results for a chapter
         
         # Save scoring results
-        scores_file = Path(self.config.evaluation_output_dir, "scores", f"chapter_{chapter_num:04d}_scores.json")
+        scores_file = Path(self.config.evaluation_output_dir, "scores", f"chapter_{self.chapter_num:04d}_scores.json")
         scores_data = {
-            "chapter": chapter_num,
+            "chapter": self.chapter_num,
             "professional_baseline": 100.0,
             "baseline_evaluation": baseline_eval,
             "enhanced_evaluation": enhanced_eval,
@@ -301,9 +294,9 @@ COMMENTS: [2-3 sentences about what works well or needs improvement for reader e
             json.dump(scores_data, f, indent=2, ensure_ascii=False)
         
         # Save side-by-side comparison for human review
-        comparison_file = Path(self.config.evaluation_output_dir, "comparisons", f"chapter_{chapter_num:04d}_side_by_side.txt")
+        comparison_file = Path(self.config.evaluation_output_dir, "comparisons", f"chapter_{self.chapter_num:04d}_side_by_side.txt")
         with open(comparison_file, 'w', encoding='utf-8') as f:
-            f.write(f"CHAPTER {chapter_num} TRANSLATION COMPARISON\n")
+            f.write(f"CHAPTER {self.chapter_num} TRANSLATION COMPARISON\n")
             f.write("=" * 80 + "\n\n")
             
             f.write("PROFESSIONAL REFERENCE (100% baseline):\n")
@@ -322,42 +315,75 @@ COMMENTS: [2-3 sentences about what works well or needs improvement for reader e
             f.write("-" * 40 + "\n")
             f.write(f"Improvement: {enhanced_eval['overall_score'] - baseline_eval['overall_score']:+.1f} points\n")
             f.write(f"Enhanced Comments: {enhanced_eval['comments']}\n")
+
+class AsyncEvaluationPipeline:    
+    """Run evaluation in parallel across multiple chapters using async"""
     
-    def run_evaluation_pipeline(self):      # Main evaluation pipeline
+    def __init__(self, config: EvaluationConfig):
+        self.config = config
+        self.setup_directories()
         
-        print("Starting Translation Evaluation Pipeline")
+    def setup_directories(self):
+        Path(self.config.evaluation_output_dir).mkdir(exist_ok=True)
+        for subdir in ["scores", "comparisons", "analytics", "reports"]:
+            Path(self.config.evaluation_output_dir, subdir).mkdir(exist_ok=True)
+    
+    async def run_async_evaluation(self):      # Main evaluation pipeline asynchronously
+        
+        print("Starting Async Translation Evaluation Pipeline")
         print(f"Evaluator Model: {self.config.evaluator_model}")
-        print(f"Evaluating chapters {self.config.start_chapter}-{self.config.end_chapter}")
+        print(f"Max concurrent requests: {self.config.max_concurrent}")
+        print(f"Evaluating chapters {self.config.start_chapter}-{self.config.end_chapter} concurrently")
         print(f"Professional baseline = 100%")
         
         start_time = time.time()
-        successful_evaluations = 0
+        chapters = list(range(self.config.start_chapter, self.config.end_chapter + 1))
         
-        for chapter_num in range(self.config.start_chapter, self.config.end_chapter + 1):
-            try:
-                print(f"\n{'='*60}")
-                metrics = self.evaluate_chapter(chapter_num)
-                if metrics:
-                    successful_evaluations += 1
-                    print(f"Chapter {chapter_num} evaluated successfully")
-                else:
-                    print(f"Chapter {chapter_num} evaluation failed")
-            except Exception as e:
-                print(f"Failed to evaluate chapter {chapter_num}: {e}")
-                continue
+        # Create semaphore to limit concurrent requests
+        semaphore = asyncio.Semaphore(self.config.max_concurrent)
         
-        # Final summary and analytics
+        # Create evaluators for each chapter
+        evaluators = [AsyncChapterEvaluator(self.config, chapter_num) for chapter_num in chapters]
+        
+        # Create tasks for all chapters
+        tasks = [evaluator.evaluate_chapter_async(semaphore) for evaluator in evaluators]
+        
+        print(f"Launching {len(tasks)} concurrent evaluation tasks...")
+        
+        # Run all tasks concurrently
+        results_list = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Process results
+        successful_metrics = []
+        failed_count = 0
+        
+        for i, result in enumerate(results_list):
+            chapter_num = chapters[i]
+            if isinstance(result, Exception):
+                print(f"Chapter {chapter_num} failed with exception: {result}")
+                failed_count += 1
+            elif result is not None:
+                successful_metrics.append(result)
+            else:
+                failed_count += 1
+        
+        evaluation_time = time.time() - start_time
+        print(f"Async evaluation complete in {evaluation_time:.1f}s")
+        print(f"Successfully evaluated {len(successful_metrics)}/{len(chapters)} chapters")
+        print(f"Failed chapters: {failed_count}")
+        
+        # Save analytics
+        print("Saving final evaluation report...")
+        self.save_final_evaluation_report(successful_metrics)
+        
+        # Final summary
         total_time = time.time() - start_time
-        self.save_final_evaluation_report()
-        
-        print(f"\n{'='*60}")
-        print("EVALUATION PIPELINE COMPLETE")
+        print(f"Async Evaluation Pipeline Complete")
         print(f"Total time: {total_time:.1f}s")
-        print(f"Chapters evaluated: {successful_evaluations}/{self.config.end_chapter - self.config.start_chapter + 1}")
         
-        if self.evaluation_metrics:
-            avg_baseline = sum(m.baseline_score for m in self.evaluation_metrics) / len(self.evaluation_metrics)
-            avg_enhanced = sum(m.enhanced_score for m in self.evaluation_metrics) / len(self.evaluation_metrics)
+        if successful_metrics:
+            avg_baseline = sum(m.baseline_score for m in successful_metrics) / len(successful_metrics)
+            avg_enhanced = sum(m.enhanced_score for m in successful_metrics) / len(successful_metrics)
             avg_improvement = avg_enhanced - avg_baseline
             
             print(f"\nRESULTS SUMMARY:")
@@ -371,24 +397,28 @@ COMMENTS: [2-3 sentences about what works well or needs improvement for reader e
                 print(f"Enhanced translations performed {abs(avg_improvement):.1f} points worse than baseline")
             else:
                 print(f"Minimal change detected. Rule learning needs refinement")
-    
-    def save_final_evaluation_report(self):     # Save comprehensive evaluation analytics and report
         
-        if not self.evaluation_metrics:
+        return successful_metrics
+    
+    def save_final_evaluation_report(self, metrics: List[EvaluationMetrics]):     # Save comprehensive evaluation analytics and report
+        
+        if not metrics:
             print("No evaluation metrics to save")
             return
         
         # Calculate comprehensive statistics
-        baseline_scores = [m.baseline_score for m in self.evaluation_metrics]
-        enhanced_scores = [m.enhanced_score for m in self.evaluation_metrics]
-        improvements = [m.improvement for m in self.evaluation_metrics]
+        baseline_scores = [m.baseline_score for m in metrics]
+        enhanced_scores = [m.enhanced_score for m in metrics]
+        improvements = [m.improvement for m in metrics]
         
         analytics = {
             "evaluation_config": asdict(self.config),
             "summary_statistics": {
-                "chapters_evaluated": len(self.evaluation_metrics),
+                "chapters_evaluated": len(metrics),
                 "evaluator_model": self.config.evaluator_model,
                 "evaluation_date": datetime.now().isoformat(),
+                "async_processing": True,
+                "max_concurrent": self.config.max_concurrent,
                 
                 "baseline_performance": {
                     "average_score": round(sum(baseline_scores) / len(baseline_scores), 2),
@@ -413,7 +443,7 @@ COMMENTS: [2-3 sentences about what works well or needs improvement for reader e
                     "max_decline": min(improvements)
                 }
             },
-            "detailed_metrics": [asdict(m) for m in self.evaluation_metrics],
+            "detailed_metrics": [asdict(m) for m in metrics],
             "evaluation_conclusion": self.generate_evaluation_conclusion(improvements)
         }
         
@@ -429,7 +459,9 @@ COMMENTS: [2-3 sentences about what works well or needs improvement for reader e
             f.write("=" * 50 + "\n\n")
             f.write(f"Evaluation Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
             f.write(f"Evaluator Model: {self.config.evaluator_model}\n")
-            f.write(f"Chapters Evaluated: {len(self.evaluation_metrics)}\n\n")
+            f.write(f"Chapters Evaluated: {len(metrics)}\n")
+            f.write(f"Processing Method: Async (concurrent)\n")
+            f.write(f"Max Concurrent: {self.config.max_concurrent}\n\n")
             
             f.write("PERFORMANCE SUMMARY:\n")
             f.write("-" * 20 + "\n")
@@ -443,11 +475,11 @@ COMMENTS: [2-3 sentences about what works well or needs improvement for reader e
             
             f.write("CHAPTER-BY-CHAPTER RESULTS:\n")
             f.write("-" * 30 + "\n")
-            for metrics in self.evaluation_metrics:
-                f.write(f"Chapter {metrics.chapter_num:2d}: ")
-                f.write(f"Baseline {metrics.baseline_score:2.0f}% → ")
-                f.write(f"Enhanced {metrics.enhanced_score:2.0f}% ")
-                f.write(f"({metrics.improvement:+.1f})\n")
+            for metric in metrics:
+                f.write(f"Chapter {metric.chapter_num:2d}: ")
+                f.write(f"Baseline {metric.baseline_score:2.0f}% → ")
+                f.write(f"Enhanced {metric.enhanced_score:2.0f}% ")
+                f.write(f"({metric.improvement:+.1f})\n")
             
             f.write(f"\nCONCLUSION:\n")
             f.write("-" * 15 + "\n")
@@ -475,12 +507,20 @@ COMMENTS: [2-3 sentences about what works well or needs improvement for reader e
             return f"Enhanced translations performed {abs(avg_improvement):.1f} points worse than baseline on average. Only {positive_count}/{total_count} chapters improved. Rule learning may be applying incorrect patterns. Review rule extraction process."
 
 def main():     # Main execution function for evaluation pipeline
+    parser = argparse.ArgumentParser(description="Async Translation Evaluation Pipeline")
+    parser.add_argument("--chapter", type=int, help="Evaluate single chapter (for individual evaluation)")
+    parser.add_argument("--start", type=int, default=1, help="Start chapter for async processing")
+    parser.add_argument("--end", type=int, default=3, help="End chapter for async processing")
+    parser.add_argument("--concurrent", type=int, default=3, help="Max concurrent requests")
+    
+    args = parser.parse_args()
     
     config = EvaluationConfig(
-        start_chapter=1,
-        end_chapter=3,
+        start_chapter=args.start,
+        end_chapter=args.end,
         evaluator_model="deepseek-chat",  # Use DeepSeek for unbiased evaluation
-        temperature=0.2  # Low temperature for consistent, objective scoring
+        temperature=0.2,  # Low temperature for consistent, objective scoring
+        max_concurrent=args.concurrent
     )
     
     # Check API key
@@ -506,22 +546,37 @@ def main():     # Main execution function for evaluation pipeline
         for dir_path in missing_dirs:
             print(f"  - {dir_path}")
         print("\nPlease run the translation pipelines first:")
-        print("  1. python scripts/1_baseline_translate.py")
-        print("  2. python scripts/4_enhanced_translate.py")
+        print("  1. python scripts/1_baseline_translate_async.py")
+        print("  2. python scripts/4_enhanced_translate_async.py")
         return
     
-    print("Evaluation Configuration:")
-    print(f"  Evaluator Model: {config.evaluator_model}")
-    print(f"  Temperature: {config.temperature}")
-    print(f"  Chapters: {config.start_chapter}-{config.end_chapter}")
-    print(f"  Baseline Results: {config.baseline_results_dir}")
-    print(f"  Enhanced Results: {config.enhanced_results_dir}")
-    print(f"  Ground Truth: {config.ground_truth_dir}")
-    print(f"  Output Directory: {config.evaluation_output_dir}")
-    
-    # Initialize and run evaluation
-    evaluator = TranslationEvaluator(config)
-    evaluator.run_evaluation_pipeline()
+    if args.chapter:
+        # Single chapter mode (for individual evaluation)
+        print(f"Evaluating single chapter: {args.chapter}")
+        async def single_chapter():
+            semaphore = asyncio.Semaphore(1)
+            evaluator = AsyncChapterEvaluator(config, args.chapter)
+            result = await evaluator.evaluate_chapter_async(semaphore)
+            if result:
+                print(f"Chapter {args.chapter} evaluated successfully")
+            else:
+                print(f"Chapter {args.chapter} evaluation failed")
+        
+        asyncio.run(single_chapter())
+    else:
+        # Async mode (evaluate all chapters)
+        print("Async Evaluation Configuration:")
+        print(f"  Evaluator Model: {config.evaluator_model}")
+        print(f"  Temperature: {config.temperature}")
+        print(f"  Max concurrent: {config.max_concurrent}")
+        print(f"  Chapters: {config.start_chapter}-{config.end_chapter}")
+        print(f"  Baseline Results: {config.baseline_results_dir}")
+        print(f"  Enhanced Results: {config.enhanced_results_dir}")
+        print(f"  Ground Truth: {config.ground_truth_dir}")
+        print(f"  Output Directory: {config.evaluation_output_dir}")
+        
+        pipeline = AsyncEvaluationPipeline(config)
+        asyncio.run(pipeline.run_async_evaluation())
 
 if __name__ == "__main__":
     main()
