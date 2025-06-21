@@ -5,10 +5,10 @@ A self-improving Chinese-to-English translation pipeline specifically designed f
 ## Current Status: API-Based Pipeline (Phase 1)
 
 **Working Components:**
-- ✅ **Rule Extraction**: Compares translations to extract improvement patterns
-- ✅ **Rule Cleaning**: AI-powered filtering of actionable translation rules  
-- ✅ **Enhanced Translation**: Applies learned rules to improve future translations
-- ✅ **Evaluation Pipeline**: Measures improvement over baseline translations
+- Rule Extraction: Compares translations to extract improvement patterns
+- Rule Cleaning: AI-powered filtering of actionable translation rules  
+- Enhanced Translation: Applies learned rules to improve future translations
+- Evaluation Pipeline: Measures improvement over baseline translations
 
 **Currently Using**: DeepSeek API + Cerebras API for fast, cost-effective development and testing.
 
@@ -33,7 +33,7 @@ Fixed Rule: "Use 'Pill God' instead of 'Alchemy Emperor' to match professional s
 Result: Better similarity scores and consistency
 ```
 
-## Planned Structure
+## Project Structure
 
 ```
 /backend
@@ -94,7 +94,7 @@ python scripts/retranslate.py
 
 ## Key Innovations
 
-### 1. **Pattern-Based Learning**
+### 1. Pattern-Based Learning
 Instead of simple term lookup, retrieves translation patterns with context:
 ```
 Input: "他突破到了金丹期"
@@ -103,7 +103,7 @@ Context: "金丹期 → Golden Core stage (not Gold Core period)"
 Output: "He broke through to the Golden Core stage"
 ```
 
-### 2. **Self-Improving Rules Database**
+### 2. Self-Improving Rules Database
 ```json
 {
   "rule_type": "terminology",
@@ -114,7 +114,7 @@ Output: "He broke through to the Golden Core stage"
 }
 ```
 
-### 3. **Comparative Analysis**
+### 3. Comparative Analysis
 - **Baseline Similarity**: ~0.22-0.35 against ground truth
 - **Enhanced Similarity**: Target >0.40 with learned rules
 - **Continuous Improvement**: Rules updated based on performance
@@ -145,15 +145,15 @@ Output: "He broke through to the Golden Core stage"
 
 ## Development Roadmap
 
-### Phase 1: API-Based Foundation ✅
+### Phase 1: API-Based Foundation (Current)
 - [x] Basic translation pipeline
 - [x] Rule extraction and cleaning
 - [x] Enhanced translation with rules
 - [x] Performance evaluation
 - [x] Prompt engineering for better rule learning
 
-### Phase 2: Optimization & Scale 🔄
-- [ ] Fix rule learning direction (learn toward ground truth)
+### Phase 2: Optimization & Scale (In Progress)
+- [x] Fix rule learning direction (learn toward ground truth)
 - [ ] Expand to 10+ chapters for better rule diversity
 - [ ] Implement rule success tracking and auto-filtering
 - [ ] Optimize prompt engineering for consistency
@@ -164,7 +164,7 @@ Output: "He broke through to the Golden Core stage"
 - [ ] Real-time rule application and learning
 - [ ] Web interface for translation management
 
-### Phase 4: Production Features
+### Phase 4: Production Features (Planned)
 - [ ] Multi-novel rule sharing and adaptation
 - [ ] Advanced context understanding (plot awareness)
 - [ ] Integration with reading platforms
@@ -178,38 +178,6 @@ Output: "He broke through to the Golden Core stage"
 - **Total**: <$0.05 per chapter for complete pipeline
 
 **Scalability**: At current costs, processing 1000 chapters would cost ~$50, making this approach viable for extensive testing and development.
-
----
-
-## Legacy Setup (Local Infrastructure)
-
-~~**Original Plan**: Deploy locally with vLLM + CUDA 12.8 on WSL2~~  
-**Current Status**: Moved to API-based development due to driver compatibility issues
-
-<details>
-<summary>Click to view original local setup plans</summary>
-
-### Local Environment Setup (WSL2 + CUDA 12.8) - ON HOLD
-
-This project was originally designed for Windows 11 + WSL2 with local GPU acceleration via CUDA 12.8 and NVIDIA RTX 5090. Due to vLLM driver compatibility issues, I moved to API-based development for faster iteration.
-
-#### System Requirements (Future)
-- Windows 11 with WSL2 enabled
-- NVIDIA GPU with latest WSL-compatible drivers  
-- Ubuntu 24.04 LTS installed via WSL
-- Python 3.12
-- CUDA Toolkit 12.8 (WSL version)
-
-#### Local Stack (Planned)
-- **LLM**: Qwen2.5-32B (local inference via vLLM)
-- **Vector Store**: FAISS for semantic pattern search
-- **Framework**: LangChain for RAG orchestration  
-- **Backend**: FastAPI for API services
-- **Frontend**: Next.js for translation interface
-
-*Note: Will return to local deployment once NVIDIA driver ecosystem stabilizes for WSL2 + vLLM compatibility.*
-
-</details>
 
 ---
 
@@ -258,6 +226,38 @@ python scripts/retranslate.py
 # 5. Check results
 cat results/enhanced_results/analytics/enhanced_analytics.json
 ```
+
+---
+
+## Legacy Setup (Local Infrastructure)
+
+**Original Plan**: Deploy locally with vLLM + CUDA 12.8 on WSL2  
+**Current Status**: Moved to API-based development due to driver compatibility issues
+
+<details>
+<summary>Click to view original local setup plans</summary>
+
+### Local Environment Setup (WSL2 + CUDA 12.8) - ON HOLD
+
+This project was originally designed for Windows 11 + WSL2 with local GPU acceleration via CUDA 12.8 and NVIDIA RTX 5090. Due to vLLM driver compatibility issues, moved to API-based development for faster iteration.
+
+#### System Requirements (Future)
+- Windows 11 with WSL2 enabled
+- NVIDIA GPU with latest WSL-compatible drivers  
+- Ubuntu 24.04 LTS installed via WSL
+- Python 3.12
+- CUDA Toolkit 12.8 (WSL version)
+
+#### Local Stack (Planned)
+- **LLM**: Qwen2.5-32B (local inference via vLLM)
+- **Vector Store**: FAISS for semantic pattern search
+- **Framework**: LangChain for RAG orchestration  
+- **Backend**: FastAPI for API services
+- **Frontend**: Next.js for translation interface
+
+*Note: Will return to local deployment once NVIDIA driver ecosystem stabilizes for WSL2 + vLLM compatibility.*
+
+</details>
 
 ---
 
