@@ -115,7 +115,7 @@ class RuleLearningPipeline:
                 ground_truth = '\n'.join(lines[3:]).strip()  # Skip title, word count, separator
         
         # Original Chinese (for context)
-        chinese_file = Path("clean_chapters", f"chapter_{chapter_num:04d}_cn.txt")
+        chinese_file = Path("../data/chapters/clean", f"chapter_{chapter_num:04d}_cn.txt")
         chinese_text = ""
         if chinese_file.exists():
             with open(chinese_file, 'r', encoding='utf-8') as f:
