@@ -208,8 +208,8 @@ COMMENTS: [2-3 sentences about what works well or needs improvement for reader e
         
         # Extract scores using regex
         patterns = {
-            "overall_score": r"OVERALL:\s*(\d+)%",
-            "flow_score": r"FLOW:\s*(\d+)%",
+            "overall_score": r"\*{0,2}OVERALL\*{0,2}:\s*(\d+)%",
+            "flow_score": r"\*{0,2}FLOW\*{0,2}:\s*(\d+)%",
             "character_score": r"CHARACTER:\s*(\d+)%",
             "clarity_score": r"CLARITY:\s*(\d+)%",
             "genre_score": r"GENRE:\s*(\d+)%"

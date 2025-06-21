@@ -1,6 +1,5 @@
 import json
 import os
-import re
 from pathlib import Path
 from datetime import datetime
 from cerebras.cloud.sdk import Cerebras
