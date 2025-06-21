@@ -37,20 +37,16 @@ class ComparisonMetrics:
 
 @dataclass
 class LearningConfig:
-    deepseek_results_dir: str = "deepseek_results"
-    ground_truth_dir: str = "translated_chapters"
-    rules_database_file: str = "rules_database.json"
-    output_dir: str = "learning_results"
-    
+    deepseek_results_dir: str = "../results/baseline"
+    ground_truth_dir: str = "../data/chapters/ground_truth"
+    rules_database_file: str = "../data/rules/extracted_raw.json"
+    output_dir: str = "../results/analysis"
     start_chapter: int = 1
     end_chapter: int = 3
-    
-    # AI settings for rule extraction
     model: str = "deepseek-chat"
-    temperature: float = 1.0  # Match Data Cleaning recommendation
+    temperature: float = 1.0
     max_tokens: int = 8192
     base_url: str = "https://api.deepseek.com"
-    
     # Rule filtering
     min_confidence: float = 0.7
     max_rules_per_comparison: int = 5

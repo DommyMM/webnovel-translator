@@ -25,9 +25,9 @@ class ChapterMetrics:
 
 @dataclass
 class PipelineConfig:
-    chinese_chapters_dir: str = "clean_chapters"
-    english_chapters_dir: str = "translated_chapters" 
-    output_dir: str = "deepseek_results"
+    chinese_chapters_dir: str = "../data/chapters/clean"
+    english_chapters_dir: str = "../data/chapters/ground_truth" 
+    output_dir: str = "../results/baseline"
     start_chapter: int = 1
     end_chapter: int = 3
     model: str = "deepseek-chat"

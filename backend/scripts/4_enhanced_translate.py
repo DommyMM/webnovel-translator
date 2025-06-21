@@ -25,11 +25,11 @@ class ChapterMetrics:
 
 @dataclass
 class EnhancedConfig:
-    chinese_chapters_dir: str = "clean_chapters"
-    english_chapters_dir: str = "translated_chapters" 
-    baseline_results_dir: str = "deepseek_results"    # For comparison
-    output_dir: str = "enhanced_results"              # New enhanced results
-    rules_file: str = "rules_clean.json"
+    chinese_chapters_dir: str = "../data/chapters/clean"
+    english_chapters_dir: str = "../data/chapters/ground_truth"
+    baseline_results_dir: str = "../results/baseline"
+    output_dir: str = "../results/enhanced"
+    rules_file: str = "../data/rules/cleaned.json"
     start_chapter: int = 1
     end_chapter: int = 3
     model: str = "deepseek-chat"
