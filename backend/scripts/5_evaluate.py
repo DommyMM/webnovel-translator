@@ -31,24 +31,20 @@ class EvaluationMetrics:
 
 @dataclass
 class EvaluationConfig:
-    baseline_results_dir: str = "backend/results/baseline"
-    enhanced_results_dir: str = "backend/results/enhanced" 
-    ground_truth_dir: str = "backend/data/chapters/ground_truth"
-    evaluation_output_dir: str = "backend/results/evaluation"
-    
+    baseline_results_dir: str = "../results/baseline"
+    enhanced_results_dir: str = "../results/enhanced"
+    ground_truth_dir: str = "../data/chapters/ground_truth"
+    evaluation_output_dir: str = "../results/evaluation"
     start_chapter: int = 1
     end_chapter: int = 3
-    
     # Use DeepSeek for evaluation but with different settings for unbiased scoring
     evaluator_model: str = "deepseek-chat"
     temperature: float = 0.2  # Low temp for consistent, objective scoring
     max_tokens: int = 2048
-    
     # For DeepSeek API
     base_url: str = "https://api.deepseek.com"
 
-class TranslationEvaluator:
-    """Objective evaluation system for translation quality improvement"""
+class TranslationEvaluator:     # Objective evaluation system for translation quality improvement
     
     def __init__(self, config: EvaluationConfig):
         self.config = config
@@ -67,8 +63,7 @@ class TranslationEvaluator:
         for subdir in ["scores", "comparisons", "analytics", "reports"]:
             Path(self.config.evaluation_output_dir, subdir).mkdir(exist_ok=True)
     
-    def load_translations(self, chapter_num: int) -> tuple[str, str, str]:
-        """Load baseline, enhanced, and ground truth translations"""
+    def load_translations(self, chapter_num: int) -> tuple[str, str, str]:       # Load baseline, enhanced, and ground truth translations
         
         # Load baseline translation (DeepSeek raw)
         baseline_file = Path(self.config.baseline_results_dir, "translations", f"chapter_{chapter_num:04d}_deepseek.txt")
@@ -108,11 +103,10 @@ class TranslationEvaluator:
         
         return baseline_text, enhanced_text, ground_truth
     
-    def create_evaluation_prompt(self, translation: str, ground_truth: str, translation_type: str) -> str:
-        """Create evaluation prompt for AI scoring"""
+    def create_evaluation_prompt(self, translation: str, ground_truth: str, translation_type: str) -> str:     # Create evaluation prompt for AI scoring
         
         prompt = f"""You are a Western reader who enjoys cultivation novels. Your job is to rate how much you'd enjoy reading this translation compared to the professional version.
-
+    
 PROFESSIONAL REFERENCE (your 100% gold standard):
 {ground_truth}
 
@@ -122,26 +116,28 @@ PROFESSIONAL REFERENCE (your 100% gold standard):
 **Your Task**: Rate this translation as a Western reader who wants to enjoy the story.
 
 **What You Care About** (as a Western cultivation novel reader):
-✅ **Natural English Flow**: Does it read smoothly like a real English novel?
-✅ **Character Personality**: Do characters feel real and consistent?  
-✅ **Story Enjoyment**: Can you follow the action and get invested?
-✅ **Proper Cultivation Terms**: Do terms like "Spiritual Strength" feel right?
-✅ **Western Style**: Written for Western readers, not literal translation
+- **Natural English Flow**: Does it read smoothly like a real English novel?
+- **Character Personality**: Do characters feel real and consistent?  
+- **Story Enjoyment**: Can you follow the action and get invested?
+- **Proper Cultivation Terms**: Do terms like "Spiritual Strength" feel right?
+- **Western Style**: Written for Western readers colloquially, not literal translation
 
 **What You DON'T Care About**:
-❌ Perfect word-for-word accuracy if meaning is clear
-❌ Minor differences that don't affect story flow
-❌ Academic translation precision over readability
+- Perfect word-for-word accuracy if meaning is clear
+- Minor differences that don't affect story flow
+- Academic translation precision over readability
 
 **Key Question**: "Would I rather read this version or the professional version?"
 
 **Scoring Scale**:
-- 90-100%: Just as good as the professional! I'd happily read this
-- 80-89%: Very good, minor rough spots but still enjoyable  
-- 70-79%: Decent read, noticeably worse but not bad
-- 60-69%: Readable but several things bother me
-- 50-59%: Poor quality, hard to enjoy the story
-- Below 50%: So bad I'd stop reading
+- 95-100%: Perfect - reads like a professional English novel, no issues unless you nitpick
+- 85-95%: Excellent - reads like professional English, would prefer this over many fan translations
+- 70-84%: Very good - smooth reading with minor artifacts, fully enjoyable
+- 55-69%: Good - readable with some awkward phrasing, but story flows well
+- 40-54%: Acceptable - clearly machine translated but understandable, some choppy sections
+- 25-39%: Poor - heavy machine translation artifacts, difficult to follow story
+- 10-24%: Very poor - broken English, major comprehension issues
+- 0-9%: Unreadable - incomprehensible, completely failed translation
 
 **Rate these aspects**:
 1. **Overall Enjoyment**: How much would you enjoy this vs professional?
@@ -157,11 +153,10 @@ CHARACTER: [score]%
 CLARITY: [score]%
 GENRE: [score]%
 COMMENTS: [2-3 sentences about what works well or needs improvement for reader enjoyment]"""
-
+    
         return prompt
     
-    def evaluate_translation(self, translation: str, ground_truth: str, translation_type: str) -> Dict:
-        """Get AI evaluation scores for a translation"""
+    def evaluate_translation(self, translation: str, ground_truth: str, translation_type: str) -> Dict:      # Get AI evaluation scores for a translation
         
         start_time = time.time()
         prompt = self.create_evaluation_prompt(translation, ground_truth, translation_type)
@@ -200,8 +195,7 @@ COMMENTS: [2-3 sentences about what works well or needs improvement for reader e
                 "raw_response": ""
             }
     
-    def parse_evaluation_response(self, response_text: str) -> Dict:
-        """Parse the AI evaluation response into structured scores"""
+    def parse_evaluation_response(self, response_text: str) -> Dict:     # Parse the AI evaluation response into structured scores
         
         scores = {
             "overall_score": 0,
@@ -233,8 +227,7 @@ COMMENTS: [2-3 sentences about what works well or needs improvement for reader e
         
         return scores
     
-    def evaluate_chapter(self, chapter_num: int) -> EvaluationMetrics:
-        """Evaluate both baseline and enhanced translations for a chapter"""
+    def evaluate_chapter(self, chapter_num: int) -> EvaluationMetrics:       # Evaluate both baseline and enhanced translations for a chapter
         
         print(f"\nEvaluating Chapter {chapter_num}")
         print("-" * 50)
@@ -290,8 +283,7 @@ COMMENTS: [2-3 sentences about what works well or needs improvement for reader e
             return None
     
     def save_chapter_evaluation(self, chapter_num: int, baseline_eval: Dict, enhanced_eval: Dict, 
-                               metrics: EvaluationMetrics, baseline_text: str, enhanced_text: str, ground_truth: str):
-        """Save detailed evaluation results for a chapter"""
+                               metrics: EvaluationMetrics, baseline_text: str, enhanced_text: str, ground_truth: str):      # Save detailed evaluation results for a chapter
         
         # Save scoring results
         scores_file = Path(self.config.evaluation_output_dir, "scores", f"chapter_{chapter_num:04d}_scores.json")
@@ -331,8 +323,7 @@ COMMENTS: [2-3 sentences about what works well or needs improvement for reader e
             f.write(f"Improvement: {enhanced_eval['overall_score'] - baseline_eval['overall_score']:+.1f} points\n")
             f.write(f"Enhanced Comments: {enhanced_eval['comments']}\n")
     
-    def run_evaluation_pipeline(self):
-        """Main evaluation pipeline"""
+    def run_evaluation_pipeline(self):      # Main evaluation pipeline
         
         print("Starting Translation Evaluation Pipeline")
         print(f"Evaluator Model: {self.config.evaluator_model}")
@@ -348,11 +339,11 @@ COMMENTS: [2-3 sentences about what works well or needs improvement for reader e
                 metrics = self.evaluate_chapter(chapter_num)
                 if metrics:
                     successful_evaluations += 1
-                    print(f"✓ Chapter {chapter_num} evaluated successfully")
+                    print(f"Chapter {chapter_num} evaluated successfully")
                 else:
-                    print(f"✗ Chapter {chapter_num} evaluation failed")
+                    print(f"Chapter {chapter_num} evaluation failed")
             except Exception as e:
-                print(f"✗ Failed to evaluate chapter {chapter_num}: {e}")
+                print(f"Failed to evaluate chapter {chapter_num}: {e}")
                 continue
         
         # Final summary and analytics
@@ -375,14 +366,13 @@ COMMENTS: [2-3 sentences about what works well or needs improvement for reader e
             print(f"Average Improvement: {avg_improvement:+.1f} points")
             
             if avg_improvement > 0:
-                print(f"🎉 Rule learning is WORKING! Translations improved by {avg_improvement:.1f} points on average")
+                print(f"Rule learning shows improvement. Translations improved by {avg_improvement:.1f} points on average")
             elif avg_improvement < -2:
-                print(f"⚠️ Rule learning may be hurting quality. Enhanced scores {abs(avg_improvement):.1f} points lower")
+                print(f"Enhanced translations performed {abs(avg_improvement):.1f} points worse than baseline")
             else:
-                print(f"📊 Minimal change. Rule learning needs refinement")
+                print(f"Minimal change detected. Rule learning needs refinement")
     
-    def save_final_evaluation_report(self):
-        """Save comprehensive evaluation analytics and report"""
+    def save_final_evaluation_report(self):     # Save comprehensive evaluation analytics and report
         
         if not self.evaluation_metrics:
             print("No evaluation metrics to save")
@@ -466,27 +456,25 @@ COMMENTS: [2-3 sentences about what works well or needs improvement for reader e
         print(f"Evaluation analytics saved to: {analytics_file}")
         print(f"Human-readable report saved to: {report_file}")
     
-    def generate_evaluation_conclusion(self, improvements: List[float]) -> str:
-        """Generate conclusion about rule learning effectiveness"""
+    def generate_evaluation_conclusion(self, improvements: List[float]) -> str:      # Generate conclusion about rule learning effectiveness
         
         avg_improvement = sum(improvements) / len(improvements)
         positive_count = len([x for x in improvements if x > 0])
         total_count = len(improvements)
         
         if avg_improvement > 5:
-            return f"EXCELLENT: Rule learning is highly effective. Enhanced translations averaged {avg_improvement:.1f} points better than baseline, with {positive_count}/{total_count} chapters showing improvement. The rule extraction and application system is working well."
+            return f"Rule learning is highly effective. Enhanced translations averaged {avg_improvement:.1f} points better than baseline, with {positive_count}/{total_count} chapters showing improvement. The rule extraction and application system is working well."
         
         elif avg_improvement > 2:
-            return f"GOOD: Rule learning is working. Enhanced translations showed {avg_improvement:.1f} point average improvement over baseline. {positive_count}/{total_count} chapters improved. Consider expanding the rule database for even better results."
+            return f"Rule learning is working. Enhanced translations showed {avg_improvement:.1f} point average improvement over baseline. {positive_count}/{total_count} chapters improved. Consider expanding the rule database for better results."
         
         elif avg_improvement > -1:
-            return f"NEUTRAL: Rule learning shows minimal impact. Average change of {avg_improvement:.1f} points suggests rules may need refinement. {positive_count}/{total_count} chapters improved. Review rule quality and application logic."
+            return f"Rule learning shows minimal impact. Average change of {avg_improvement:.1f} points suggests rules may need refinement. {positive_count}/{total_count} chapters improved. Review rule quality and application logic."
         
         else:
-            return f"CONCERNING: Enhanced translations performed {abs(avg_improvement):.1f} points worse than baseline on average. Only {positive_count}/{total_count} chapters improved. Rule learning may be applying incorrect patterns. Review rule extraction process."
+            return f"Enhanced translations performed {abs(avg_improvement):.1f} points worse than baseline on average. Only {positive_count}/{total_count} chapters improved. Rule learning may be applying incorrect patterns. Review rule extraction process."
 
-def main():
-    """Main execution function for evaluation pipeline"""
+def main():     # Main execution function for evaluation pipeline
     
     config = EvaluationConfig(
         start_chapter=1,
