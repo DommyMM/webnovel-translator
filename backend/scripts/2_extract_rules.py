@@ -2,11 +2,13 @@ import os
 import time
 import json
 import re
+import argparse
+import asyncio
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional
 from dataclasses import dataclass, asdict
-from openai import OpenAI
+from openai import AsyncOpenAI
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -50,48 +52,28 @@ class LearningConfig:
     # Rule filtering
     min_confidence: float = 0.7
     max_rules_per_comparison: int = 5
+    max_concurrent: int = 3  # Limit concurrent API calls
 
-class RuleLearningPipeline:    
-    def __init__(self, config: LearningConfig):
+class AsyncRuleExtractor:
+    """Extract rules from a single chapter asynchronously"""
+    
+    def __init__(self, config: LearningConfig, chapter_num: int):
         self.config = config
-        self.client = OpenAI(
+        self.chapter_num = chapter_num
+        self.client = AsyncOpenAI(
             api_key=os.getenv("DEEPSEEK_API_KEY"),
             base_url=self.config.base_url
         )
         self.setup_directories()
-        self.rules_database = self.load_rules_database()
-        self.comparison_metrics: List[ComparisonMetrics] = []
         
     def setup_directories(self):
         Path(self.config.output_dir).mkdir(exist_ok=True)
-        for subdir in ["comparisons", "rules", "analytics", "raw_responses"]:
+        for subdir in ["comparisons", "rules", "analytics", "raw_responses", "temp_rules"]:
             Path(self.config.output_dir, subdir).mkdir(exist_ok=True)
     
-    def load_rules_database(self) -> Dict:  # Load or initialize the rules database
-        rules_file = Path(self.config.rules_database_file)
-        if rules_file.exists():
-            with open(rules_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        else:
-            return {
-                "rules": [],
-                "metadata": {
-                    "created_at": datetime.now().isoformat(),
-                    "total_rules": 0,
-                    "last_updated": None
-                }
-            }
-    
-    def save_rules_database(self):
-        self.rules_database["metadata"]["last_updated"] = datetime.now().isoformat()
-        self.rules_database["metadata"]["total_rules"] = len(self.rules_database["rules"])
-        
-        with open(self.config.rules_database_file, 'w', encoding='utf-8') as f:
-            json.dump(self.rules_database, f, indent=2, ensure_ascii=False)
-    
-    def load_translations(self, chapter_num: int) -> tuple[str, str, str]:      # Load DeepSeek translation, ground truth, and original Chinese text
+    def load_translations(self) -> tuple[str, str, str]:      # Load DeepSeek translation, ground truth, and original Chinese text
         # DeepSeek translation
-        deepseek_file = Path(self.config.deepseek_results_dir, "translations", f"chapter_{chapter_num:04d}_deepseek.txt")
+        deepseek_file = Path(self.config.deepseek_results_dir, "translations", f"chapter_{self.chapter_num:04d}_deepseek.txt")
         if not deepseek_file.exists():
             raise FileNotFoundError(f"DeepSeek translation not found: {deepseek_file}")
         
@@ -100,10 +82,10 @@ class RuleLearningPipeline:
             # Remove the header line if present
             if deepseek_text.startswith("DeepSeek Translation"):
                 lines = deepseek_text.split('\n')
-                deepseek_text = '\n'.join(lines[2:]).strip()  # Skip title and empty line
+                deepseek_text = '\n'.join(lines[2:]).strip()
         
         # Ground truth
-        truth_file = Path(self.config.ground_truth_dir, f"chapter_{chapter_num:04d}_en.txt")
+        truth_file = Path(self.config.ground_truth_dir, f"chapter_{self.chapter_num:04d}_en.txt")
         if not truth_file.exists():
             raise FileNotFoundError(f"Ground truth not found: {truth_file}")
         
@@ -112,10 +94,10 @@ class RuleLearningPipeline:
             # Remove chapter header if present
             lines = ground_truth.split('\n')
             if lines[0].startswith("Chapter"):
-                ground_truth = '\n'.join(lines[3:]).strip()  # Skip title, word count, separator
+                ground_truth = '\n'.join(lines[3:]).strip()
         
         # Original Chinese (for context)
-        chinese_file = Path("../data/chapters/clean", f"chapter_{chapter_num:04d}_cn.txt")
+        chinese_file = Path("../data/chapters/clean", f"chapter_{self.chapter_num:04d}_cn.txt")
         chinese_text = ""
         if chinese_file.exists():
             with open(chinese_file, 'r', encoding='utf-8') as f:
@@ -123,7 +105,7 @@ class RuleLearningPipeline:
         
         return deepseek_text, ground_truth, chinese_text
     
-    def analyze_differences(self, deepseek_text: str, ground_truth: str, chinese_text: str, chapter_num: int) -> tuple[List[Dict], float]:        
+    async def analyze_differences(self, deepseek_text: str, ground_truth: str, chinese_text: str) -> tuple[List[Dict], float]:        
         prompt = f"""You are a translation expert analyzing two English translations of a Chinese cultivation novel. Extract rules that would make MY TRANSLATION more like the PROFESSIONAL REFERENCE (ground truth).
 
 ORIGINAL CHINESE:
@@ -151,8 +133,8 @@ CONFIDENCE: [high|medium|low]
 Be concise. Focus only on abstract principles that will apply broadly across many chapters, not specific word choices, and focus on learning FROM the professional reference to improve future translations."""
         
         try:
-            print("Making AI analysis call...")
-            response = self.client.chat.completions.create(
+            print(f"Chapter {self.chapter_num}: Making AI analysis call...")
+            response = await self.client.chat.completions.create(
                 model=self.config.model,
                 messages=[
                     {"role": "system", "content": "You are an expert translator specializing in Chinese cultivation novels. Analyze translation differences to extract actionable improvement rules."},
@@ -165,19 +147,17 @@ Be concise. Focus only on abstract principles that will apply broadly across man
             analysis = response.choices[0].message.content
             
             # Save raw response for debugging
-            raw_response_file = Path(self.config.output_dir, "raw_responses", f"chapter_{chapter_num:04d}_raw_analysis.txt")
+            raw_response_file = Path(self.config.output_dir, "raw_responses", f"chapter_{self.chapter_num:04d}_raw_analysis.txt")
             with open(raw_response_file, 'w', encoding='utf-8') as f:
-                f.write(f"Chapter {chapter_num} Raw AI Analysis\n")
+                f.write(f"Chapter {self.chapter_num} Raw AI Analysis\n")
                 f.write("=" * 50 + "\n\n")
                 f.write(analysis)
             
-            print(f"Raw response saved to: {raw_response_file}")
-            print(f"Response length: {len(analysis)} characters")
-            print(f"Response preview (first 300 chars):\n{analysis[:300]}...\n")
+            print(f"Chapter {self.chapter_num}: Response saved, parsing rules...")
             
             # Try to parse rules
             rules = self.parse_rule_analysis(analysis)
-            print(f"Successfully parsed {len(rules)} rules")
+            print(f"Chapter {self.chapter_num}: Successfully parsed {len(rules)} rules")
             
             # Calculate overall similarity
             similarity = self.calculate_similarity(deepseek_text, ground_truth)
@@ -185,13 +165,13 @@ Be concise. Focus only on abstract principles that will apply broadly across man
             return rules, similarity
             
         except Exception as e:
-            print(f"Error in rule analysis: {e}")
+            print(f"Chapter {self.chapter_num}: Error in rule analysis: {e}")
             import traceback
             traceback.print_exc()
             return [], 0.0
     
     def parse_rule_analysis(self, analysis_text: str) -> List[Dict]:        # Parse AI analysis text into structured rules
-        print("Attempting to parse rules...")
+        print(f"Chapter {self.chapter_num}: Attempting to parse rules...")
         rules = []
         
         # Split analysis into sections - try multiple approaches
@@ -201,34 +181,34 @@ Be concise. Focus only on abstract principles that will apply broadly across man
         numbered_sections = re.split(r'\n(?=\d+\.)', analysis_text)
         if len(numbered_sections) > 1:
             sections = numbered_sections
-            print(f"Found {len(sections)} numbered sections")
+            print(f"Chapter {self.chapter_num}: Found {len(sections)} numbered sections")
         else:
             # Try splitting by headers with asterisks
             header_sections = re.split(r'\n(?=\*\*[^*]+\*\*)', analysis_text)
             if len(header_sections) > 1:
                 sections = header_sections
-                print(f"Found {len(sections)} header sections")
+                print(f"Chapter {self.chapter_num}: Found {len(sections)} header sections")
             else:
                 # Try splitting by "RULE_TYPE" markers
                 rule_sections = re.split(r'\n(?=RULE_TYPE)', analysis_text, flags=re.IGNORECASE)
                 if len(rule_sections) > 1:
                     sections = rule_sections
-                    print(f"Found {len(sections)} RULE_TYPE sections")
+                    print(f"Chapter {self.chapter_num}: Found {len(sections)} RULE_TYPE sections")
                 else:
                     # Fallback: treat entire text as one section
                     sections = [analysis_text]
-                    print("Using entire text as one section")
+                    print(f"Chapter {self.chapter_num}: Using entire text as one section")
         
         for i, section in enumerate(sections):
             section = section.strip()
             if not section or len(section) < 30:
                 continue
                 
-            print(f"\nProcessing section {i+1}:")
+            print(f"Chapter {self.chapter_num}: Processing section {i+1}")
             print(f"Section preview: {section[:150]}...")
             
             current_rule = {
-                "id": f"rule_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{i}",
+                "id": f"rule_ch{self.chapter_num}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{i}",
                 "created_at": datetime.now().isoformat(),
                 "usage_count": 0,
                 "success_rate": 0.0,
@@ -323,11 +303,11 @@ Be concise. Focus only on abstract principles that will apply broadly across man
             # Validate rule
             if self.is_valid_rule(current_rule):
                 rules.append(current_rule)
-                print(f"  ✓ Valid rule added")
+                print(f"  Valid rule added")
             else:
-                print(f"  ✗ Invalid rule (missing: {[f for f in ['rule_type', 'description', 'confidence'] if not current_rule.get(f)]})")
+                print(f"  Invalid rule (missing: {[f for f in ['rule_type', 'description', 'confidence'] if not current_rule.get(f)]})")
         
-        print(f"\nFinal parsing result: {len(rules)} valid rules")
+        print(f"Chapter {self.chapter_num}: Final parsing result: {len(rules)} valid rules")
         return rules[:self.config.max_rules_per_comparison]
     
     def is_valid_rule(self, rule: Dict) -> bool:
@@ -346,131 +326,202 @@ Be concise. Focus only on abstract principles that will apply broadly across man
         
         return intersection / union if union > 0 else 0.0
     
-    def add_rules_to_database(self, new_rules: List[Dict]):
-        for rule in new_rules:
-            if rule.get("confidence", 0) >= self.config.min_confidence:
-                self.rules_database["rules"].append(rule)
-        
-        self.save_rules_database()
+    async def extract_rules_for_chapter(self, semaphore: asyncio.Semaphore) -> Dict:        # Extract rules for this specific chapter and return results
+        async with semaphore:  # Limit concurrent requests
+            print(f"Starting Chapter {self.chapter_num} analysis...")
+            
+            try:
+                # Load translations
+                deepseek_text, ground_truth, chinese_text = self.load_translations()
+                print(f"Chapter {self.chapter_num}: Loaded translations - DeepSeek: {len(deepseek_text)} chars, Truth: {len(ground_truth)} chars")
+                
+                # Analyze differences and extract rules
+                extracted_rules, similarity = await self.analyze_differences(deepseek_text, ground_truth, chinese_text)
+                
+                # Filter high-confidence rules
+                high_conf_rules = [r for r in extracted_rules if r.get("confidence", 0) >= self.config.min_confidence]
+                
+                # Calculate metrics
+                word_overlap = self.calculate_similarity(deepseek_text, ground_truth)
+                length_ratio = len(deepseek_text) / len(ground_truth) if ground_truth else 0
+                
+                metrics = {
+                    "chapter_num": self.chapter_num,
+                    "similarity_score": similarity,
+                    "word_overlap": word_overlap,
+                    "length_ratio": length_ratio,
+                    "key_differences": [],
+                    "extracted_rules": [r.get("id", "") for r in extracted_rules],
+                    "timestamp": datetime.now().isoformat()
+                }
+                
+                # Save individual chapter results
+                chapter_result = {
+                    "chapter": self.chapter_num,
+                    "metrics": metrics,
+                    "extracted_rules": extracted_rules,
+                    "high_conf_rules": high_conf_rules,
+                    "texts": {
+                        "deepseek_length": len(deepseek_text),
+                        "ground_truth_length": len(ground_truth),
+                        "deepseek_preview": deepseek_text[:200],
+                        "ground_truth_preview": ground_truth[:200]
+                    },
+                    "timestamp": datetime.now().isoformat()
+                }
+                
+                # Save to individual file for merging later
+                temp_file = Path(self.config.output_dir, "temp_rules", f"chapter_{self.chapter_num:04d}_rules.json")
+                with open(temp_file, 'w', encoding='utf-8') as f:
+                    json.dump(chapter_result, f, indent=2, ensure_ascii=False)
+                
+                print(f"Chapter {self.chapter_num} complete: Extracted {len(extracted_rules)} rules ({len(high_conf_rules)} high-confidence)")
+                
+                return chapter_result
+                
+            except Exception as e:
+                print(f"Chapter {self.chapter_num}: Error processing: {e}")
+                import traceback
+                traceback.print_exc()
+                return None
+
+class AsyncRuleLearningPipeline:    
+    """Run rule extraction in parallel across multiple chapters using async"""
     
-    def process_chapter_comparison(self, chapter_num: int) -> ComparisonMetrics:
-        print(f"\nAnalyzing Chapter {chapter_num}")
-        print("-" * 40)
-        
-        try:
-            # Load translations
-            deepseek_text, ground_truth, chinese_text = self.load_translations(chapter_num)
-            print(f"Loaded translations - DeepSeek: {len(deepseek_text)} chars, Truth: {len(ground_truth)} chars")
-            
-            # Analyze differences and extract rules
-            print("Extracting rules from comparison...")
-            extracted_rules, similarity = self.analyze_differences(deepseek_text, ground_truth, chinese_text, chapter_num)
-            
-            print(f"Extracted {len(extracted_rules)} rules, similarity: {similarity:.3f}")
-            
-            # Add high-confidence rules to database
-            high_conf_rules = [r for r in extracted_rules if r.get("confidence", 0) >= self.config.min_confidence]
-            self.add_rules_to_database(high_conf_rules)
-            
-            # Calculate metrics
-            word_overlap = self.calculate_similarity(deepseek_text, ground_truth)
-            length_ratio = len(deepseek_text) / len(ground_truth) if ground_truth else 0
-            
-            metrics = ComparisonMetrics(
-                chapter_num=chapter_num,
-                similarity_score=similarity,
-                word_overlap=word_overlap,
-                length_ratio=length_ratio,
-                key_differences=[],
-                extracted_rules=[r.get("id", "") for r in extracted_rules],
-                timestamp=datetime.now().isoformat()
-            )
-            
-            self.comparison_metrics.append(metrics)
-            
-            # Save comparison results
-            self.save_comparison_results(chapter_num, deepseek_text, ground_truth, extracted_rules, metrics)
-            
-            print(f"Added {len(high_conf_rules)} high-confidence rules to database")
-            print(f"Total rules in database: {len(self.rules_database['rules'])}")
-            
-            return metrics
-            
-        except Exception as e:
-            print(f"Error processing chapter {chapter_num}: {e}")
-            import traceback
-            traceback.print_exc()
-            return None
+    def __init__(self, config: LearningConfig):
+        self.config = config
+        self.setup_directories()
     
-    def save_comparison_results(self, chapter_num: int, deepseek_text: str, ground_truth: str, rules: List[Dict], metrics: ComparisonMetrics):
-        comparison_file = Path(self.config.output_dir, "comparisons", f"chapter_{chapter_num:04d}_analysis.json")
-        
-        comparison_data = {
-            "chapter": chapter_num,
-            "metrics": asdict(metrics),
-            "extracted_rules": rules,
-            "texts": {
-                "deepseek_length": len(deepseek_text),
-                "ground_truth_length": len(ground_truth),
-                "deepseek_preview": deepseek_text[:200],
-                "ground_truth_preview": ground_truth[:200]
-            },
-            "timestamp": datetime.now().isoformat()
-        }
-        
-        with open(comparison_file, 'w', encoding='utf-8') as f:
-            json.dump(comparison_data, f, indent=2, ensure_ascii=False)
+    def setup_directories(self):
+        Path(self.config.output_dir).mkdir(exist_ok=True)
+        for subdir in ["comparisons", "rules", "analytics", "raw_responses", "temp_rules"]:
+            Path(self.config.output_dir, subdir).mkdir(exist_ok=True)
     
-    def run_learning_pipeline(self):      # Main pipeline to run the rule learning process
-        print("Starting Rule Learning Pipeline")
-        print(f"Analyzing chapters {self.config.start_chapter}-{self.config.end_chapter}")
-        print(f"DeepSeek results: {self.config.deepseek_results_dir}")
-        print(f"Ground truth: {self.config.ground_truth_dir}")
+    async def run_async_extraction(self):      # Main pipeline to run the rule learning process asynchronously
+        print("Starting Async Rule Extraction Pipeline")
+        print(f"Processing chapters {self.config.start_chapter}-{self.config.end_chapter} concurrently")
+        print(f"Max concurrent requests: {self.config.max_concurrent}")
         
         start_time = time.time()
+        chapters = list(range(self.config.start_chapter, self.config.end_chapter + 1))
         
-        for chapter_num in range(self.config.start_chapter, self.config.end_chapter + 1):
-            try:
-                metrics = self.process_chapter_comparison(chapter_num)
-                if metrics:
-                    print(f"Progress: {len(self.comparison_metrics)}/{self.config.end_chapter - self.config.start_chapter + 1} chapters")
-            except Exception as e:
-                print(f"Failed to process chapter {chapter_num}: {e}")
-                continue
+        # Create semaphore to limit concurrent requests
+        semaphore = asyncio.Semaphore(self.config.max_concurrent)
         
-        # Final summary
+        # Create extractors for each chapter
+        extractors = [AsyncRuleExtractor(self.config, chapter_num) for chapter_num in chapters]
+        
+        # Create tasks for all chapters
+        tasks = [extractor.extract_rules_for_chapter(semaphore) for extractor in extractors]
+        
+        print(f"Launching {len(tasks)} concurrent rule extraction tasks...")
+        
+        # Run all tasks concurrently
+        results_list = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Process results
+        results = {}
+        failed_count = 0
+        
+        for i, result in enumerate(results_list):
+            chapter_num = chapters[i]
+            if isinstance(result, Exception):
+                print(f"Chapter {chapter_num} failed with exception: {result}")
+                failed_count += 1
+            elif result is not None:
+                results[chapter_num] = result
+            else:
+                failed_count += 1
+        
+        extraction_time = time.time() - start_time
+        print(f"Async extraction complete in {extraction_time:.1f}s")
+        print(f"Successfully processed {len(results)}/{len(chapters)} chapters")
+        print(f"Failed chapters: {failed_count}")
+        
+        # Merge all results
+        print("Merging results...")
+        self.merge_all_results(results)
+        
         total_time = time.time() - start_time
-        print(f"\nRule Learning Pipeline Complete")
+        print(f"Async Rule Learning Pipeline Complete")
         print(f"Total time: {total_time:.1f}s")
-        print(f"Chapters analyzed: {len(self.comparison_metrics)}")
-        print(f"Total rules learned: {len(self.rules_database['rules'])}")
         
-        if self.comparison_metrics:
-            avg_similarity = sum(m.similarity_score for m in self.comparison_metrics) / len(self.comparison_metrics)
-            print(f"Average similarity: {avg_similarity:.3f}")
-        
-        self.save_final_analytics()
+        return results
     
-    def save_final_analytics(self):
+    def merge_all_results(self, results: Dict):        # Merge results from all chapters into final database
+        
+        # Initialize merged database
+        merged_database = {
+            "rules": [],
+            "metadata": {
+                "created_at": datetime.now().isoformat(),
+                "total_rules": 0,
+                "last_updated": datetime.now().isoformat(),
+                "extraction_method": "async",
+                "chapters_processed": len(results),
+                "max_concurrent": self.config.max_concurrent
+            }
+        }
+        
+        all_metrics = []
+        
+        # Merge rules and metrics from all chapters
+        for chapter_num in sorted(results.keys()):
+            result = results[chapter_num]
+            
+            # Add high-confidence rules to merged database
+            high_conf_rules = result.get("high_conf_rules", [])
+            merged_database["rules"].extend(high_conf_rules)
+            
+            # Collect metrics
+            all_metrics.append(result["metrics"])
+            
+            # Save individual comparison file
+            comparison_file = Path(self.config.output_dir, "comparisons", f"chapter_{chapter_num:04d}_analysis.json")
+            with open(comparison_file, 'w', encoding='utf-8') as f:
+                json.dump(result, f, indent=2, ensure_ascii=False)
+        
+        # Update metadata
+        merged_database["metadata"]["total_rules"] = len(merged_database["rules"])
+        
+        # Save merged rules database
+        with open(self.config.rules_database_file, 'w', encoding='utf-8') as f:
+            json.dump(merged_database, f, indent=2, ensure_ascii=False)
+        
+        # Save analytics
+        self.save_analytics(merged_database, all_metrics)
+        
+        # Clean up temp files
+        temp_dir = Path(self.config.output_dir, "temp_rules")
+        if temp_dir.exists():
+            for temp_file in temp_dir.glob("*.json"):
+                temp_file.unlink()
+        
+        print(f"Merged {len(merged_database['rules'])} high-confidence rules from {len(results)} chapters")
+        print(f"Rules database saved to: {self.config.rules_database_file}")
+    
+    def save_analytics(self, merged_database: Dict, all_metrics: List):        # Save final analytics
         analytics_file = Path(self.config.output_dir, "analytics", "learning_analytics.json")
         
-        high_conf_rules = [r for r in self.rules_database["rules"] if r.get("confidence", 0) >= 0.8]
+        high_conf_rules = [r for r in merged_database["rules"] if r.get("confidence", 0) >= 0.8]
         rule_types = {}
-        for rule in self.rules_database["rules"]:
+        for rule in merged_database["rules"]:
             rule_type = rule.get("rule_type", "unknown")
             rule_types[rule_type] = rule_types.get(rule_type, 0) + 1
         
         analytics = {
             "config": asdict(self.config),
             "summary": {
-                "chapters_analyzed": len(self.comparison_metrics),
-                "total_rules_extracted": len(self.rules_database["rules"]),
+                "chapters_analyzed": len(all_metrics),
+                "total_rules_extracted": len(merged_database["rules"]),
                 "high_confidence_rules": len(high_conf_rules),
                 "rule_types_distribution": rule_types,
-                "avg_similarity": sum(m.similarity_score for m in self.comparison_metrics) / len(self.comparison_metrics) if self.comparison_metrics else 0
+                "avg_similarity": sum(m["similarity_score"] for m in all_metrics) / len(all_metrics) if all_metrics else 0,
+                "extraction_method": "async",
+                "max_concurrent": self.config.max_concurrent
             },
-            "comparison_metrics": [asdict(m) for m in self.comparison_metrics],
-            "rules_database": self.rules_database,
+            "comparison_metrics": all_metrics,
+            "rules_database": merged_database,
             "generated_at": datetime.now().isoformat()
         }
         
@@ -480,18 +531,27 @@ Be concise. Focus only on abstract principles that will apply broadly across man
         print(f"Analytics saved to: {analytics_file}")
 
 def main():
-    config = LearningConfig(
-        start_chapter=1,
-        end_chapter=3,
-        model="deepseek-chat",
-        temperature=1.0,
-        min_confidence=0.7
-    )
+    parser = argparse.ArgumentParser(description="Async Rule Extraction Pipeline")
+    parser.add_argument("--chapter", type=int, help="Process single chapter (for individual extraction)")
+    parser.add_argument("--start", type=int, default=1, help="Start chapter for async processing")
+    parser.add_argument("--end", type=int, default=3, help="End chapter for async processing")
+    parser.add_argument("--concurrent", type=int, default=3, help="Max concurrent requests")
+    
+    args = parser.parse_args()
     
     # Check API key
     if not os.getenv("DEEPSEEK_API_KEY"):
         print("Error: DEEPSEEK_API_KEY not found in environment")
         return
+    
+    config = LearningConfig(
+        start_chapter=args.start,
+        end_chapter=args.end,
+        model="deepseek-chat",
+        temperature=1.0,
+        min_confidence=0.7,
+        max_concurrent=args.concurrent
+    )
     
     # Check if required directories exist
     required_dirs = [config.deepseek_results_dir, config.ground_truth_dir]
@@ -500,16 +560,31 @@ def main():
             print(f"Error: Required directory not found: {dir_path}")
             return
     
-    print("Learning Configuration:")
-    print(f"  DeepSeek results: {config.deepseek_results_dir}")
-    print(f"  Ground truth: {config.ground_truth_dir}")
-    print(f"  Chapters: {config.start_chapter}-{config.end_chapter}")
-    print(f"  Min confidence: {config.min_confidence}")
-    print(f"  Model: {config.model}")
-    
-    # Initialize and run pipeline
-    pipeline = RuleLearningPipeline(config)
-    pipeline.run_learning_pipeline()
+    if args.chapter:
+        # Single chapter mode (for individual processing)
+        print(f"Processing single chapter: {args.chapter}")
+        async def single_chapter():
+            semaphore = asyncio.Semaphore(1)
+            extractor = AsyncRuleExtractor(config, args.chapter)
+            result = await extractor.extract_rules_for_chapter(semaphore)
+            if result:
+                print(f"Chapter {args.chapter} processed successfully")
+            else:
+                print(f"Chapter {args.chapter} processing failed")
+        
+        asyncio.run(single_chapter())
+    else:
+        # Async mode (process all chapters)
+        print("Async Rule Extraction Configuration:")
+        print(f"  DeepSeek results: {config.deepseek_results_dir}")
+        print(f"  Ground truth: {config.ground_truth_dir}")
+        print(f"  Chapters: {config.start_chapter}-{config.end_chapter}")
+        print(f"  Min confidence: {config.min_confidence}")
+        print(f"  Model: {config.model}")
+        print(f"  Max concurrent: {config.max_concurrent}")
+        
+        pipeline = AsyncRuleLearningPipeline(config)
+        asyncio.run(pipeline.run_async_extraction())
 
 if __name__ == "__main__":
     main()
