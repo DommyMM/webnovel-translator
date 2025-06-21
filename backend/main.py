@@ -13,7 +13,6 @@ load_dotenv()
 
 @dataclass
 class ChapterMetrics:
-    """Track metrics for each chapter processing"""
     chapter_num: int
     chinese_chars: int
     english_chars: int
@@ -26,7 +25,6 @@ class ChapterMetrics:
 
 @dataclass
 class PipelineConfig:
-    """Configuration for the DeepSeek translation pipeline"""
     chinese_chapters_dir: str = "clean_chapters"
     english_chapters_dir: str = "translated_chapters" 
     output_dir: str = "deepseek_results"
@@ -37,9 +35,7 @@ class PipelineConfig:
     max_tokens: int = 8192
     base_url: str = "https://api.deepseek.com"
 
-class DeepSeekTranslationPipeline:
-    """Main pipeline for DeepSeek-based chapter translation"""
-    
+class DeepSeekTranslationPipeline:    
     def __init__(self, config: PipelineConfig):
         self.config = config
         self.client = OpenAI(
@@ -50,13 +46,11 @@ class DeepSeekTranslationPipeline:
         self.metrics: List[ChapterMetrics] = []
         
     def setup_directories(self):
-        """Create output directory structure"""
         Path(self.config.output_dir).mkdir(exist_ok=True)
         for subdir in ["translations", "comparisons", "analytics"]:
             Path(self.config.output_dir, subdir).mkdir(exist_ok=True)
     
     def load_chapter_files(self, chapter_num: int) -> tuple[str, str]:
-        """Load Chinese and English files for a chapter"""
         cn_file = Path(self.config.chinese_chapters_dir) / f"chapter_{chapter_num:04d}_cn.txt"
         en_file = Path(self.config.english_chapters_dir) / f"chapter_{chapter_num:04d}_en.txt"
         
@@ -98,7 +92,6 @@ Please provide a high-quality English translation:"""
         return prompt.format(chinese_text=chinese_text)
     
     def translate_chapter(self, chinese_text: str) -> tuple[str, Dict]:
-        """Translate chapter using DeepSeek API"""
         start_time = time.time()
         prompt = self.create_translation_prompt(chinese_text)
         
@@ -137,8 +130,7 @@ Please provide a high-quality English translation:"""
             print(f"Translation failed: {str(e)}")
             return "", {"translation_time": 0, "total_tokens": 0, "tokens_per_second": 0}
     
-    def calculate_basic_similarity(self, translation: str, ground_truth: str) -> float:
-        """Calculate word overlap similarity between translation and reference"""
+    def calculate_basic_similarity(self, translation: str, ground_truth: str) -> float:     # Calculate word overlap similarity
         trans_words = set(translation.lower().split())
         truth_words = set(ground_truth.lower().split())
         
@@ -152,9 +144,7 @@ Please provide a high-quality English translation:"""
         similarity = intersection / union if union > 0 else 0.0
         return min(similarity * 1.5, 1.0)
     
-    def save_chapter_results(self, chapter_num: int, chinese_text: str, translation: str, 
-                           ground_truth: str, performance_stats: Dict):
-        """Save translation output and comparison metrics"""
+    def save_chapter_results(self, chapter_num: int, chinese_text: str, translation: str, ground_truth: str, performance_stats: Dict):
         # Save translation
         translation_file = Path(self.config.output_dir, "translations", f"chapter_{chapter_num:04d}_deepseek.txt")
         with open(translation_file, 'w', encoding='utf-8') as f:
@@ -179,7 +169,6 @@ Please provide a high-quality English translation:"""
             json.dump(comparison_data, f, indent=2, ensure_ascii=False)
     
     def process_chapter(self, chapter_num: int) -> ChapterMetrics:
-        """Process a single chapter through DeepSeek translation"""
         print(f"\nProcessing Chapter {chapter_num}")
         print("-" * 50)
         
@@ -234,7 +223,6 @@ Please provide a high-quality English translation:"""
         return metrics
     
     def save_final_analytics(self):
-        """Save comprehensive analytics for the entire run"""
         analytics_file = Path(self.config.output_dir, "analytics", "deepseek_analytics.json")
         
         if not self.metrics:
@@ -269,7 +257,6 @@ Please provide a high-quality English translation:"""
         print(f"Analytics saved to: {analytics_file}")
     
     def run_pipeline(self):
-        """Execute the DeepSeek translation pipeline"""
         print("Starting DeepSeek Translation Pipeline")
         print(f"Model: {self.config.model}")
         print(f"Temperature: {self.config.temperature}")
@@ -301,7 +288,6 @@ Please provide a high-quality English translation:"""
         self.save_final_analytics()
 
 def main():
-    """Main entry point for DeepSeek translation testing"""
     config = PipelineConfig(
         start_chapter=1,
         end_chapter=3,

@@ -13,7 +13,6 @@ load_dotenv()
 
 @dataclass
 class TranslationRule:
-    """Represents a learned translation rule"""
     id: str
     rule_type: str  # "terminology", "style", "grammar", "cultural"
     description: str
@@ -28,7 +27,6 @@ class TranslationRule:
 
 @dataclass
 class ComparisonMetrics:
-    """Metrics from comparing our translation vs ground truth"""
     chapter_num: int
     similarity_score: float
     word_overlap: float
@@ -39,7 +37,6 @@ class ComparisonMetrics:
 
 @dataclass
 class LearningConfig:
-    """Configuration for the learning pipeline"""
     deepseek_results_dir: str = "deepseek_results"
     ground_truth_dir: str = "translated_chapters"
     rules_database_file: str = "rules_database.json"
@@ -58,9 +55,7 @@ class LearningConfig:
     min_confidence: float = 0.7
     max_rules_per_comparison: int = 5
 
-class RuleLearningPipeline:
-    """Pipeline for extracting and learning translation rules"""
-    
+class RuleLearningPipeline:    
     def __init__(self, config: LearningConfig):
         self.config = config
         self.client = OpenAI(
@@ -72,13 +67,11 @@ class RuleLearningPipeline:
         self.comparison_metrics: List[ComparisonMetrics] = []
         
     def setup_directories(self):
-        """Create output directories"""
         Path(self.config.output_dir).mkdir(exist_ok=True)
         for subdir in ["comparisons", "rules", "analytics", "raw_responses"]:
             Path(self.config.output_dir, subdir).mkdir(exist_ok=True)
     
-    def load_rules_database(self) -> Dict:
-        """Load existing rules database or create new one"""
+    def load_rules_database(self) -> Dict:  # Load or initialize the rules database
         rules_file = Path(self.config.rules_database_file)
         if rules_file.exists():
             with open(rules_file, 'r', encoding='utf-8') as f:
@@ -94,15 +87,13 @@ class RuleLearningPipeline:
             }
     
     def save_rules_database(self):
-        """Save rules database to file"""
         self.rules_database["metadata"]["last_updated"] = datetime.now().isoformat()
         self.rules_database["metadata"]["total_rules"] = len(self.rules_database["rules"])
         
         with open(self.config.rules_database_file, 'w', encoding='utf-8') as f:
             json.dump(self.rules_database, f, indent=2, ensure_ascii=False)
     
-    def load_translations(self, chapter_num: int) -> tuple[str, str, str]:
-        """Load DeepSeek translation, ground truth, and original Chinese"""
+    def load_translations(self, chapter_num: int) -> tuple[str, str, str]:      # Load DeepSeek translation, ground truth, and original Chinese text
         # DeepSeek translation
         deepseek_file = Path(self.config.deepseek_results_dir, "translations", f"chapter_{chapter_num:04d}_deepseek.txt")
         if not deepseek_file.exists():
@@ -136,9 +127,7 @@ class RuleLearningPipeline:
         
         return deepseek_text, ground_truth, chinese_text
     
-    def analyze_differences(self, deepseek_text: str, ground_truth: str, chinese_text: str, chapter_num: int) -> tuple[List[Dict], float]:
-        """Use AI to analyze differences and extract rules"""
-        
+    def analyze_differences(self, deepseek_text: str, ground_truth: str, chinese_text: str, chapter_num: int) -> tuple[List[Dict], float]:        
         prompt = f"""You are a translation expert analyzing two English translations of a Chinese cultivation novel. Extract only the most significant, abstract translation rules that would improve future work.
 
 ORIGINAL CHINESE:
@@ -205,8 +194,7 @@ Be concise. Focus only on abstract principles that will apply broadly across man
             traceback.print_exc()
             return [], 0.0
     
-    def parse_rule_analysis(self, analysis_text: str) -> List[Dict]:
-        """Parse AI analysis into structured rules"""
+    def parse_rule_analysis(self, analysis_text: str) -> List[Dict]:        # Parse AI analysis text into structured rules
         print("Attempting to parse rules...")
         rules = []
         
@@ -347,12 +335,10 @@ Be concise. Focus only on abstract principles that will apply broadly across man
         return rules[:self.config.max_rules_per_comparison]
     
     def is_valid_rule(self, rule: Dict) -> bool:
-        """Check if a rule has required fields"""
         required_fields = ["rule_type", "description", "confidence"]
         return all(field in rule and rule[field] for field in required_fields)
     
     def calculate_similarity(self, text1: str, text2: str) -> float:
-        """Calculate similarity between two texts"""
         words1 = set(text1.lower().split())
         words2 = set(text2.lower().split())
         
@@ -365,7 +351,6 @@ Be concise. Focus only on abstract principles that will apply broadly across man
         return intersection / union if union > 0 else 0.0
     
     def add_rules_to_database(self, new_rules: List[Dict]):
-        """Add new rules to the database"""
         for rule in new_rules:
             if rule.get("confidence", 0) >= self.config.min_confidence:
                 self.rules_database["rules"].append(rule)
@@ -373,7 +358,6 @@ Be concise. Focus only on abstract principles that will apply broadly across man
         self.save_rules_database()
     
     def process_chapter_comparison(self, chapter_num: int) -> ComparisonMetrics:
-        """Compare our translation with ground truth and extract rules"""
         print(f"\nAnalyzing Chapter {chapter_num}")
         print("-" * 40)
         
@@ -422,9 +406,7 @@ Be concise. Focus only on abstract principles that will apply broadly across man
             traceback.print_exc()
             return None
     
-    def save_comparison_results(self, chapter_num: int, deepseek_text: str, ground_truth: str, 
-                              rules: List[Dict], metrics: ComparisonMetrics):
-        """Save detailed comparison results"""
+    def save_comparison_results(self, chapter_num: int, deepseek_text: str, ground_truth: str, rules: List[Dict], metrics: ComparisonMetrics):
         comparison_file = Path(self.config.output_dir, "comparisons", f"chapter_{chapter_num:04d}_analysis.json")
         
         comparison_data = {
@@ -443,8 +425,7 @@ Be concise. Focus only on abstract principles that will apply broadly across man
         with open(comparison_file, 'w', encoding='utf-8') as f:
             json.dump(comparison_data, f, indent=2, ensure_ascii=False)
     
-    def run_learning_pipeline(self):
-        """Execute the complete learning pipeline"""
+    def run_learning_pipeline(self):      # Main pipeline to run the rule learning process
         print("Starting Rule Learning Pipeline")
         print(f"Analyzing chapters {self.config.start_chapter}-{self.config.end_chapter}")
         print(f"DeepSeek results: {self.config.deepseek_results_dir}")
@@ -475,7 +456,6 @@ Be concise. Focus only on abstract principles that will apply broadly across man
         self.save_final_analytics()
     
     def save_final_analytics(self):
-        """Save comprehensive analytics"""
         analytics_file = Path(self.config.output_dir, "analytics", "learning_analytics.json")
         
         high_conf_rules = [r for r in self.rules_database["rules"] if r.get("confidence", 0) >= 0.8]
@@ -504,7 +484,6 @@ Be concise. Focus only on abstract principles that will apply broadly across man
         print(f"Analytics saved to: {analytics_file}")
 
 def main():
-    """Main entry point for rule learning"""
     config = LearningConfig(
         start_chapter=1,
         end_chapter=3,

@@ -7,9 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-def clean_rules_with_cerebras():
-    """Use Cerebras to intelligently clean and extract core translation rules"""
-    
+def clean_rules_with_cerebras():        # Use Cerebras (because it's fast and free) to clean and extract core translation rules
     # Load current messy rules database
     with open("rules_database.json", 'r', encoding='utf-8') as f:
         current_db = json.load(f)
@@ -36,42 +34,37 @@ def clean_rules_with_cerebras():
 MESSY RULES DATABASE:
 {rules_text}
 
-Extract and rewrite ONLY the 5 most actionable, high-quality translation rules. Ignore:
+Extract and rewrite the 8-10 most actionable, high-quality translation rules. Ignore:
 - Header text like "Here are the rules..."
-- Parsing artifacts with "**" symbols
+- Parsing artifacts with "**" symbols  
 - Incomplete sentences
 - Vague descriptions
 - Example text masquerading as rules
 
 For each rule you keep, provide:
-1. **RULE_TYPE**: [terminology|style|cultural|structure]
-2. **DESCRIPTION**: Clear, actionable principle (one sentence)
-3. **CONFIDENCE**: [high|medium|low]
-4. **REASONING**: Why this rule is important for cultivation novel translation
+**RULE_TYPE**: [terminology|style|cultural|structure]
+**DESCRIPTION**: Clear, actionable principle (one sentence)
 
-Focus on rules that would meaningfully improve future translations. Be selective and prioritize quality over quantity.
+Focus on rules that would meaningfully improve future translations. Be selective and prioritize quality.
 
-Output format:
-RULE_1:
-TYPE: [type]
-DESCRIPTION: [clear actionable rule]
-CONFIDENCE: [level]
-REASONING: [why this matters]
-
-RULE_2:
+Output exactly in this format:
+1. **terminology**: Use "Alchemy Emperor" instead of "Pill God" for consistency
+2. **style**: Prioritize active voice and dynamic verbs in action scenes  
+3. **cultural**: Adapt Chinese idioms to natural English while retaining meaning
 ...etc
-"""
+
+Only output the numbered list of rules, nothing else."""
 
     try:
-        # Use llama-3.3-70b for good reasoning capability
+        # Use qwen-3-32b for reasoning capability and longer context
         response = client.chat.completions.create(
-            model="llama-3.3-70b",
+            model="qwen-3-32b",
             messages=[
-                {"role": "system", "content": "You are an expert translation analyst specializing in Chinese cultivation novels. Extract only the highest quality, most actionable translation rules."},
+                {"role": "system", "content": "You are an expert translation analyst specializing in Chinese cultivation novels. Think through what makes a high-quality, actionable translation rule."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.1,  # Low temperature for consistent extraction
-            max_tokens=2000
+            max_tokens=1500
         )
         
         ai_analysis = response.choices[0].message.content
@@ -96,7 +89,7 @@ RULE_2:
             "metadata": {
                 "created_at": datetime.now().isoformat(),
                 "total_rules": len(clean_rules),
-                "cleaned_by": "cerebras_llama-3.3-70b",
+                "cleaned_by": "cerebras_qwen-3-32b",
                 "original_count": len(current_db["rules"]),
                 "cleaning_date": datetime.now().isoformat()
             }
@@ -111,7 +104,7 @@ RULE_2:
             f.write("CLEAN TRANSLATION RULES\n")
             f.write("=" * 50 + "\n\n")
             f.write(f"Extracted {len(clean_rules)} high-quality rules from {len(current_db['rules'])} original rules\n")
-            f.write(f"Cleaned by: Cerebras llama-3.3-70b\n")
+            f.write(f"Cleaned by: Cerebras qwen-3-32b\n")
             f.write(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
             
             for i, rule in enumerate(clean_rules, 1):
@@ -123,14 +116,14 @@ RULE_2:
                 f.write("\n" + "-"*30 + "\n\n")
         
         print(f"\nFinal results:")
-        print(f"✓ Clean rules saved to: rules_clean.json")
-        print(f"✓ Readable format saved to: rules_clean.txt")
-        print(f"✓ Extracted {len(clean_rules)} rules from {len(current_db['rules'])} original")
+        print(f"Clean rules saved to: rules_clean.json")
+        print(f"Readable format saved to: rules_clean.txt")
+        print(f"Extracted {len(clean_rules)} rules from {len(current_db['rules'])} original")
         
         # Display the clean rules
-        print(f"\n{'='*60}")
+        print("=" * 60)
         print("FINAL CLEAN RULES:")
-        print(f"{'='*60}")
+        print("=" * 60)
         
         for i, rule in enumerate(clean_rules, 1):
             print(f"\n{i}. {rule['rule_type'].upper()}: {rule['description']}")
@@ -142,52 +135,48 @@ RULE_2:
         print(f"Error using Cerebras: {e}")
         return None
 
-def parse_cerebras_response(response_text):
-    """Parse Cerebras response into structured rules"""
+def parse_cerebras_response(response_text):         # Parse the raw response from Cerebras into structured rules
     rules = []
     
-    # Split by RULE_ markers
-    sections = response_text.split("RULE_")[1:]  # Skip first empty section
+    # Split by numbered lines
+    lines = response_text.strip().split('\n')
     
-    for i, section in enumerate(sections):
-        if not section.strip():
+    for line in lines:
+        line = line.strip()
+        if not line or not line[0].isdigit():
             continue
             
-        rule = {
-            "id": f"rule_clean_{i+1}",
-            "created_at": datetime.now().isoformat(),
-            "usage_count": 0,
-            "success_rate": 0.0,
-            "last_used": None
-        }
-        
-        lines = section.strip().split('\n')
-        
-        for line in lines:
-            line = line.strip()
-            if line.startswith("TYPE:"):
-                rule_type = line.replace("TYPE:", "").strip().replace("[", "").replace("]", "")
-                rule["rule_type"] = rule_type
-            elif line.startswith("DESCRIPTION:"):
-                description = line.replace("DESCRIPTION:", "").strip()
-                rule["description"] = description
-            elif line.startswith("CONFIDENCE:"):
-                conf_text = line.replace("CONFIDENCE:", "").strip().replace("[", "").replace("]", "").lower()
-                confidence_map = {"high": 0.9, "medium": 0.7, "low": 0.5}
-                rule["confidence"] = confidence_map.get(conf_text, 0.7)
-            elif line.startswith("REASONING:"):
-                reasoning = line.replace("REASONING:", "").strip()
-                rule["reasoning"] = reasoning
-        
-        # Validate rule has essential fields
-        if "rule_type" in rule and "description" in rule:
-            rules.append(rule)
+        # Parse format: "1. **terminology**: Use "Alchemy Emperor" instead..."
+        if '**' in line and ':' in line:
+            try:
+                # Extract number
+                number_part = line.split('.')[0]
+                rest = '.'.join(line.split('.')[1:]).strip()
+                
+                # Extract rule type (between **)
+                if '**' in rest:
+                    type_part = rest.split('**')[1].split('**')[0].strip()
+                    desc_part = rest.split('**')[2].split(':', 1)[1].strip() if ':' in rest.split('**')[2] else ""
+                    
+                    if type_part and desc_part:
+                        rule = {
+                            "id": f"rule_clean_{len(rules)+1}",
+                            "rule_type": type_part.lower(),
+                            "description": desc_part,
+                            "confidence": 0.8,  # Default high confidence since Qwen filtered these
+                            "created_at": datetime.now().isoformat(),
+                            "usage_count": 0,
+                            "success_rate": 0.0,
+                            "last_used": None
+                        }
+                        rules.append(rule)
+            except:
+                # Skip malformed lines
+                continue
     
     return rules
 
-def main():
-    """Main entry point"""
-    
+def main():    
     # Check Cerebras API key
     if not os.getenv("CEREBRAS_API_KEY"):
         print("Error: CEREBRAS_API_KEY not found in environment")
@@ -201,15 +190,15 @@ def main():
         return
     
     print("Starting Cerebras rule cleaning...")
-    print("Using free Cerebras llama-3.3-70b to extract core rules")
+    print("Using Cerebras qwen-3-32b to extract core rules")
     
     result = clean_rules_with_cerebras()
     
     if result:
-        print("\n✅ Rule cleaning complete!")
+        print("\nRule cleaning complete")
         print("Next step: Use rules_clean.json for re-translation testing")
     else:
-        print("\n❌ Rule cleaning failed")
+        print("\nRule cleaning failed")
 
 if __name__ == "__main__":
     main()
