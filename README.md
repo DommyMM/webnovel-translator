@@ -2,247 +2,263 @@
 
 A self-improving Chinese-to-English translation pipeline specifically designed for web novels, with emphasis on terminology consistency and quality improvement through pattern learning.
 
+## Current Status: API-Based Pipeline (Phase 1)
+
+**Working Components:**
+- ✅ **Rule Extraction**: Compares translations to extract improvement patterns
+- ✅ **Rule Cleaning**: AI-powered filtering of actionable translation rules  
+- ✅ **Enhanced Translation**: Applies learned rules to improve future translations
+- ✅ **Evaluation Pipeline**: Measures improvement over baseline translations
+
+**Currently Using**: DeepSeek API + Cerebras API for fast, cost-effective development and testing.
+
+---
+
 ## Project Vision
 
 Traditional LLM translation suffers from inconsistent terminology, especially in domain-specific content like cultivation novels. This system builds a living knowledge base that learns optimal translation patterns from existing high-quality translations, then applies those patterns to new content.
 
-## Core Architecture
+## Current Architecture (Phase 1)
 
-### Stage 1: Pattern-Enhanced Translation
+### Working Pipeline
 ```
-Chinese Input → Semantic Analysis → Pattern Retrieval → LLM Translation → English Output
+Chinese Input → Baseline Translation → Compare with Ground Truth → Extract Rules → Enhanced Translation
 ```
 
-Instead of simple term lookup, we retrieve translation patterns with context.
+**Example Improvement**:
+```
+Original Rule: "Use 'Alchemy Emperor' instead of 'Pill God'"
+Ground Truth: Actually uses "Pill God" 
+Fixed Rule: "Use 'Pill God' instead of 'Alchemy Emperor' to match professional standards"
+Result: Better similarity scores and consistency
+```
 
-Example:
+## Planned Structure
+
+```
+/backend
+├── data/
+│   ├── chapters/
+│   │   ├── raw/              # Original scraped content
+│   │   ├── clean/            # Processed Chinese text
+│   │   └── ground_truth/     # Reference translations
+│   └── rules/
+│       ├── extracted_raw.json    # Initial rule database
+│       ├── cleaned.json           # Filtered actionable rules
+│       └── analysis/              # AI analysis outputs
+├── scripts/
+│   ├── 1_baseline_translate.py    # Baseline translation pipeline
+│   ├── 2_extract_rules.py         # Rule learning from comparisons
+│   ├── 3_clean_rules.py           # AI-powered rule refinement
+│   ├── 4_enhanced_translate.py    # Rule-enhanced translation
+│   ├── 5_evaluate.py              # Quality assessment
+│   └── scrape/                    # Data collection tools
+├── results/
+│   ├── baseline/                  # Initial translation results
+│   ├── enhanced/                  # Improved translation results
+│   └── analysis/                  # Comparative analysis
+└── temp/                          # Temporary files and logs
+```
+
+## Current Workflow
+
+### 1. Data Collection
+```bash
+# Scrape raw Chinese chapters
+python scripts/scrape/scrape.py
+
+# Clean and process text  
+python scripts/scrape/clean.py
+```
+
+### 2. Baseline Translation
+```bash
+# Translate chapters with DeepSeek API
+python scripts/main.py
+```
+
+### 3. Rule Learning  
+```bash
+# Extract rules by comparing with ground truth
+python scripts/rules.py
+
+# Clean and filter rules with Cerebras AI
+python scripts/clean_rules.py
+```
+
+### 4. Enhanced Translation
+```bash
+# Re-translate with learned rules
+python scripts/retranslate.py
+```
+
+## Key Innovations
+
+### 1. **Pattern-Based Learning**
+Instead of simple term lookup, retrieves translation patterns with context:
 ```
 Input: "他突破到了金丹期"
-Pattern Retrieved: "突破到 + [realm] → broke through to + [realm]"
+Learned Pattern: "突破到 + [realm] → broke through to + [realm]"  
 Context: "金丹期 → Golden Core stage (not Gold Core period)"
 Output: "He broke through to the Golden Core stage"
 ```
 
-### Stage 2: Self-Learning Proofreader
-```
-My Translation → Compare with Ground Truth → Extract Patterns → Update Knowledge Base
-```
-
-The system automatically learns rules like:
-- "丹神 → Pill Sovereign (preferred over Dan God)"
-- "境界 → realm (in cultivation context, not boundary)"
-- "强者 → expert (formal) vs powerhouse (casual)"
-
-## Knowledge Base Structure
-
-### Pattern Database
+### 2. **Self-Improving Rules Database**
 ```json
 {
-  "pattern_id": "cultivation_breakthrough",
-  "chinese_pattern": "[subject] 突破到了 [realm]",
-  "english_pattern": "[subject] broke through to [realm]",
-  "context_tags": ["cultivation", "advancement"],
-  "confidence_score": 0.95,
-  "usage_count": 247
+  "rule_type": "terminology",
+  "description": "Use 'Pill God' instead of 'Alchemy Emperor' for consistency",
+  "confidence": 0.9,
+  "usage_count": 12,
+  "success_rate": 0.85
 }
 ```
 
-### Terminology Registry
-```json
-{
-  "term": "金丹期",
-  "preferred_translation": "Golden Core stage",
-  "alternatives": ["Golden Core period", "Gold Core stage"],
-  "context": "cultivation_realm",
-  "frequency": 1834,
-  "quality_score": 0.88
-}
-```
+### 3. **Comparative Analysis**
+- **Baseline Similarity**: ~0.22-0.35 against ground truth
+- **Enhanced Similarity**: Target >0.40 with learned rules
+- **Continuous Improvement**: Rules updated based on performance
 
-### Style Rules
-```json
-{
-  "rule": "realm_formality",
-  "description": "Use 'stage' for cultivation realms, not 'period' or 'level'",
-  "examples": [
-    {"bad": "Foundation period", "good": "Foundation stage"},
-    {"bad": "Core Formation level", "good": "Core Formation stage"}
-  ]
-}
-```
+## Tech Stack (Current)
 
-## Implementation Plan
+### APIs (Development Phase)
+- **DeepSeek API**: Primary translation engine (temp=1.3 for translation tasks)
+- **Cerebras API**: Rule extraction and cleaning (free tier: 900 req/hour)
+- **OpenAI SDK**: Unified interface for both APIs
 
-### Phase 1: Foundation
-- [ ] Set up Qwen2.5-32B local inference with vLLM
-- [ ] Build FAISS vector store for pattern storage
-- [ ] Create pattern extraction pipeline from existing translations
-- [ ] Implement basic RAG retrieval system
+### Evaluation Metrics
+- **Jaccard Similarity**: Word overlap between translation and ground truth
+- **Terminology Consistency**: Track rule application success rates
+- **Performance Tracking**: Translation speed, token usage, cost analysis
 
-### Phase 2: Core Translation
-- [ ] Design context-aware pattern matching
-- [ ] Implement sliding context windows for chapter coherence
-- [ ] Build confidence scoring for pattern selection
-- [ ] Optimize KV-cache for throughput (target: 150+ chapters/hour)
+## Results So Far
 
-### Phase 3: Self-Improvement
-- [ ] Build comparison engine (my translation vs ground truth)
-- [ ] Implement automatic pattern learning
-- [ ] Create rule extraction from differences
-- [ ] Build feedback loop for knowledge base updates
+### Rule Learning Success
+- **Extracted**: 13 raw rules from 3 chapter comparisons
+- **Cleaned**: 8 actionable rules (terminology, style, cultural, structure)
+- **Quality**: High confidence rules (0.8+) for consistent application
 
-### Phase 4: Validation
-- [ ] Blind A/B testing framework vs GPT-4.1
-- [ ] Quality metrics (BLEU, semantic similarity, human preference)
-- [ ] Performance benchmarking
-- [ ] Documentation and deployment
+### Translation Improvement (Ongoing)
+- **Challenge Identified**: Initial rules learned backwards direction
+- **Fix Applied**: Prompt updated to learn FROM ground truth, not away from it
+- **Next Test**: Re-run enhanced translation with corrected rule learning
 
-## Success Metrics
+## Development Roadmap
 
-### Quality Targets
-- 75%+ preference rate in blind testing vs GPT-4.1
-- 90%+ terminology consistency within novels
-- Sub-5% error rate on established pattern applications
+### Phase 1: API-Based Foundation ✅
+- [x] Basic translation pipeline
+- [x] Rule extraction and cleaning
+- [x] Enhanced translation with rules
+- [x] Performance evaluation
+- [x] Prompt engineering for better rule learning
 
-### Performance Targets
-- 150+ chapters/hour translation throughput
-- Sub-second pattern retrieval latency
+### Phase 2: Optimization & Scale 🔄
+- [ ] Fix rule learning direction (learn toward ground truth)
+- [ ] Expand to 10+ chapters for better rule diversity
+- [ ] Implement rule success tracking and auto-filtering
+- [ ] Optimize prompt engineering for consistency
 
-## Technical Stack
+### Phase 3: Local Infrastructure (Future)
+- [ ] Local LLM deployment once drivers stabilize
+- [ ] FAISS vector store for semantic pattern search  
+- [ ] Real-time rule application and learning
+- [ ] Web interface for translation management
 
-### Core Components
-- LLM: Qwen2.5-32B (local inference via vLLM)
-- Vector Store: FAISS for semantic pattern search
-- Framework: LangChain for RAG orchestration
-- Backend: FastAPI for API services
-- Frontend: Next.js for translation interface
+### Phase 4: Production Features
+- [ ] Multi-novel rule sharing and adaptation
+- [ ] Advanced context understanding (plot awareness)
+- [ ] Integration with reading platforms
+- [ ] Multi-language support (JP→EN, KR→EN)
 
-## Development Environment Setup (WSL2 + CUDA 12.8)
+## Cost Analysis (API Phase)
 
-This project is developed on Windows 11 using WSL2 with GPU acceleration via CUDA 12.8 and the NVIDIA RTX 5090. The backend stack runs in a Linux virtual environment, with code stored on the Windows filesystem.
+**Current Usage** (per chapter):
+- **DeepSeek**: ~$0.01-0.02 per chapter translation
+- **Cerebras**: Free tier covers rule extraction needs
+- **Total**: <$0.05 per chapter for complete pipeline
 
-### System Requirements
+**Scalability**: At current costs, processing 1000 chapters would cost ~$50, making this approach viable for extensive testing and development.
+
+---
+
+## Legacy Setup (Local Infrastructure)
+
+~~**Original Plan**: Deploy locally with vLLM + CUDA 12.8 on WSL2~~  
+**Current Status**: Moved to API-based development due to driver compatibility issues
+
+<details>
+<summary>Click to view original local setup plans</summary>
+
+### Local Environment Setup (WSL2 + CUDA 12.8) - ON HOLD
+
+This project was originally designed for Windows 11 + WSL2 with local GPU acceleration via CUDA 12.8 and NVIDIA RTX 5090. Due to vLLM driver compatibility issues, I moved to API-based development for faster iteration.
+
+#### System Requirements (Future)
 - Windows 11 with WSL2 enabled
-- NVIDIA GPU (e.g., RTX 5090) with latest WSL-compatible drivers
+- NVIDIA GPU with latest WSL-compatible drivers  
 - Ubuntu 24.04 LTS installed via WSL
 - Python 3.12
 - CUDA Toolkit 12.8 (WSL version)
 
-### Installation Steps
-```bash
-# 1. Install system dependencies
-sudo apt update && sudo apt upgrade -y
-sudo apt install -y build-essential curl wget git vim software-properties-common
-sudo apt install -y python3.12 python3.12-venv python3.12-dev python3-pip
+#### Local Stack (Planned)
+- **LLM**: Qwen2.5-32B (local inference via vLLM)
+- **Vector Store**: FAISS for semantic pattern search
+- **Framework**: LangChain for RAG orchestration  
+- **Backend**: FastAPI for API services
+- **Frontend**: Next.js for translation interface
 
-# 2. Install CUDA 12.8 toolkit for WSL
-wget https://developer.download.nvidia.com/compute/cuda/repos/wsl-ubuntu/x86_64/cuda-keyring_1.1-1_all.deb
-sudo dpkg -i cuda-keyring_1.1-1_all.deb
-sudo apt update
-sudo apt install -y cuda-toolkit-12-8 cuda-compiler-12-8
+*Note: Will return to local deployment once NVIDIA driver ecosystem stabilizes for WSL2 + vLLM compatibility.*
 
-# Add CUDA to PATH
-echo 'export PATH=/usr/local/cuda-12.8/bin:$PATH' >> ~/.bashrc
-echo 'export LD_LIBRARY_PATH=/usr/local/cuda-12.8/lib64:$LD_LIBRARY_PATH' >> ~/.bashrc
-source ~/.bashrc
+</details>
 
-# 3. Verify GPU access
-nvidia-smi
-nvcc --version
-```
-
-### Virtual Environment and Package Setup
-```bash
-# 1. Install `uv` (fast package manager)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-source ~/.bashrc
-
-# 2. Create virtual environment in Linux FS
-mkdir -p ~/venvs/webnovel && cd ~/venvs/webnovel
-uv venv vllm_env --python 3.12
-source vllm_env/bin/activate
-
-# 3. Install PyTorch with CUDA 12.8
-uv pip install --upgrade pip
-uv pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
-
-# 4. Confirm GPU support
-python -c "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
-
-# 5. Install RAG and backend dependencies
-uv pip install faiss-cpu sentence-transformers langchain langchain-community pandas numpy huggingface-hub fastapi uvicorn ipython jupyter vllm
-
-# Note: faiss-gpu is not yet available for Python 3.12.
-# Using faiss-cpu for now, can recreate with Python 3.10 if needed.
-
-# 6. Download model (one-time, ~16GB)
-huggingface-cli login  # Use your token
-python -c "from huggingface_hub import snapshot_download; snapshot_download('deepseek-ai/DeepSeek-R1-0528-Qwen3-8B')"
-```
-
-## Project Structure
-```
-/backend          # FastAPI server, LLM inference, RAG pipeline
-/frontend         # Next.js web interface
-/data            # Pattern databases, knowledge base
-/scripts         # Preprocessing and evaluation tools
-```
-
-## Scalability Strategy
-
-### Novel Adaptation
-1. Zero-shot: Works on new novels using base wuxia knowledge
-2. Few-shot: Rapid adaptation with 10-50 sample chapters
-3. Full-adaptation: Complete knowledge base for specific series
-
-### Domain Expansion
-- Start with cultivation/xianxia novels
-- Expand to historical fiction, system novels, etc.
-- Eventually support any Chinese web fiction genre
-
-## Key Challenges & Solutions
-
-### Challenge: Pattern Ambiguity
-Problem: "境界" could mean "realm", "boundary", "state of mind"
-Solution: Context-weighted retrieval + confidence scoring
-
-### Challenge: Style Consistency
-Problem: Different translators have different preferences
-Solution: Learn dominant patterns from high-quality sources
-
-### Challenge: Novel Evolution
-Problem: New terms appear constantly in web novels
-Solution: Automatic term detection + pattern generalization
+---
 
 ## Why This Approach Works
 
 ### vs. Simple LLM Translation
-- Consistency: Learns and enforces terminology standards
-- Quality: Builds on proven translation patterns
-- Context: Maintains story coherence across chapters
+- **Consistency**: Learns and enforces terminology standards
+- **Quality**: Builds on proven translation patterns  
+- **Context**: Maintains story coherence across chapters
 
-### vs. Traditional CAT Tools
-- Intelligence: Understands semantic patterns, not just exact matches
-- Adaptability: Self-improves from feedback
-- Scale: Handles novel-length content efficiently
+### vs. Traditional CAT Tools  
+- **Intelligence**: Understands semantic patterns, not just exact matches
+- **Adaptability**: Self-improves from feedback
+- **Scale**: Handles novel-length content efficiently
 
 ### vs. Human Translation
-- Speed: 150+ chapters/hour vs 1-2 chapters/day
-- Availability: 24/7 operation
-- Consistency: Never forgets established terminology
+- **Speed**: 150+ chapters/hour vs 1-2 chapters/day (target)
+- **Availability**: 24/7 operation
+- **Consistency**: Never forgets established terminology
+- **Cost**: <$0.05/chapter vs $50-200/chapter for human translation
 
-## Future Roadmap
+## Contributing
 
-### Short-term Goals
-- Multi-language support (JP→EN, KR→EN)
-- Real-time web novel translation
-- Community feedback integration
+1. **Test Current Pipeline**: Run the 4-step workflow on sample chapters
+2. **Improve Rule Learning**: Help refine prompts for better rule extraction
+3. **Expand Coverage**: Add more chapter pairs for training data
+4. **Evaluate Quality**: Compare results against human translations
 
-### Long-term Vision
-- Cross-novel knowledge sharing
-- Advanced context understanding (plot awareness)
-- Integration with popular reading platforms
+## Quick Start
+
+```bash
+# 1. Set up environment
+echo "DEEPSEEK_API_KEY=your_key_here" > .env
+echo "CEREBRAS_API_KEY=your_key_here" >> .env
+
+# 2. Run baseline translation
+python scripts/main.py
+
+# 3. Extract and clean rules  
+python scripts/rules.py
+python scripts/clean_rules.py
+
+# 4. Enhanced translation
+python scripts/retranslate.py
+
+# 5. Check results
+cat results/enhanced_results/analytics/enhanced_analytics.json
+```
 
 ---
 
-This system represents the next evolution in domain-specific translation: not just converting languages, but understanding and maintaining the artistic and cultural nuances that make web novels engaging.
+*This system represents the next evolution in domain-specific translation: not just converting languages, but understanding and maintaining the artistic and cultural nuances that make web novels engaging.*

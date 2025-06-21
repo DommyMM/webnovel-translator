@@ -128,31 +128,31 @@ class RuleLearningPipeline:
         return deepseek_text, ground_truth, chinese_text
     
     def analyze_differences(self, deepseek_text: str, ground_truth: str, chinese_text: str, chapter_num: int) -> tuple[List[Dict], float]:        
-        prompt = f"""You are a translation expert analyzing two English translations of a Chinese cultivation novel. Extract only the most significant, abstract translation rules that would improve future work.
+        prompt = f"""You are a translation expert analyzing two English translations of a Chinese cultivation novel. Extract rules that would make MY TRANSLATION more like the PROFESSIONAL REFERENCE (ground truth).
 
 ORIGINAL CHINESE:
 {chinese_text}
 
-MY TRANSLATION:
+MY TRANSLATION (needs improvement):
 {deepseek_text}
 
-PROFESSIONAL REFERENCE:
+PROFESSIONAL REFERENCE (target quality):
 {ground_truth}
 
-Extract 3-5 core translation rules that represent the most significant patterns for improvement. Focus on:
+Analyze where MY TRANSLATION differs from the PROFESSIONAL REFERENCE and extract 3-5 core translation rules that would make future translations more like the professional reference. Focus on:
 
-1. **High-impact terminology** - key terms that appear frequently
-2. **Fundamental style differences** - tone, formality, voice
-3. **Structural patterns** - how sentences/paragraphs are constructed
-4. **Cultural adaptation principles** - how concepts are localized
+1. **Terminology choices** - Where the professional reference uses better term choices
+2. **Style preferences** - How the professional reference handles tone, voice, formality  
+3. **Structural patterns** - How the professional reference organizes sentences/paragraphs
+4. **Cultural adaptation** - How the professional reference handles cultural elements
 
 For each rule, provide:
 RULE_TYPE: [terminology|style|structure|cultural]
-PATTERN: One clear, actionable principle
-EXAMPLE: Specific before/after from the texts
+PATTERN: What should be done to match the professional reference quality
+EXAMPLE: Specific difference showing professional reference is better
 CONFIDENCE: [high|medium|low]
 
-Be concise. Focus only on abstract principles that will apply broadly across many chapters, not specific word choices."""
+Be concise. Focus only on abstract principles that will apply broadly across many chapters, not specific word choices, and focus on learning FROM the professional reference to improve future translations."""
         
         try:
             print("Making AI analysis call...")
