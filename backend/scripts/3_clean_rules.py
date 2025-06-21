@@ -10,7 +10,7 @@ load_dotenv()
 
 def clean_rules_with_cerebras():        # Use Cerebras to clean and extract core translation rules
     # Load current messy rules database
-    with open("../data/rules/extracted_raw.json", 'r', encoding='utf-8') as f:  # Fixed path
+    with open("../data/rules/extracted_raw.json", 'r', encoding='utf-8') as f:
         current_db = json.load(f)
     
     print(f"Current database has {len(current_db['rules'])} rules")
@@ -63,7 +63,7 @@ Only output the numbered list of rules, nothing else."""
                 {"role": "user", "content": prompt}
             ],
             temperature=0.1,
-            max_tokens=16382  # Use full context
+            max_tokens=16382
         )
         
         ai_analysis = response.choices[0].message.content
@@ -75,7 +75,7 @@ Only output the numbered list of rules, nothing else."""
         analysis_dir = Path("../data/rules/analysis")
         analysis_dir.mkdir(exist_ok=True)
         
-        with open(analysis_dir / "cerebras_raw_analysis.txt", 'w', encoding='utf-8') as f:  # Fixed path
+        with open(analysis_dir / "cerebras_raw_analysis.txt", 'w', encoding='utf-8') as f:
             f.write("Cerebras Rule Analysis\n")
             f.write("=" * 50 + "\n\n")
             f.write(ai_analysis)
@@ -97,7 +97,7 @@ Only output the numbered list of rules, nothing else."""
             }
         }
         
-        # Save as both JSON and readable text - FIXED PATHS
+        # Save as both JSON and readable text
         with open("../data/rules/cleaned.json", 'w', encoding='utf-8') as f:
             json.dump(final_db, f, indent=2, ensure_ascii=False)
         
