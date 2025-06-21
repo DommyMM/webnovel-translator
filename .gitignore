@@ -1,14 +1,8 @@
-clean_chapters/
-raw_chapters/
-translated_chapters/
-/TL/
 .env
-analytics/
-comparisons/
-raw_translations/
 /__pycache__
 *.pyc
-deepseek_results/
-learning_results/
 *.json
 *.txt
+clean/
+ground_truth/
+raw/
