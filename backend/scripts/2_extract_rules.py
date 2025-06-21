@@ -49,10 +49,9 @@ class LearningConfig:
     temperature: float = 1.0
     max_tokens: int = 8192
     base_url: str = "https://api.deepseek.com"
-    # Rule filtering
     min_confidence: float = 0.7
     max_rules_per_comparison: int = 5
-    max_concurrent: int = 3  # Limit concurrent API calls
+    max_concurrent: int = 10
 
 class AsyncRuleExtractor:
     """Extract rules from a single chapter asynchronously"""

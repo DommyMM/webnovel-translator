@@ -38,7 +38,7 @@ class EnhancedConfig:
     temperature: float = 1.3
     max_tokens: int = 8192
     base_url: str = "https://api.deepseek.com"
-    max_concurrent: int = 3  # Limit concurrent translations
+    max_concurrent: int = 10
 
 class AsyncEnhancedTranslator:
     """Enhanced translator for a single chapter using learned rules"""

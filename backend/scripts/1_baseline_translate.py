@@ -35,7 +35,7 @@ class PipelineConfig:
     temperature: float = 1.3
     max_tokens: int = 8192
     base_url: str = "https://api.deepseek.com"
-    max_concurrent: int = 3     # Start with 3 for now to test performance
+    max_concurrent: int = 10
 
 class ParallelDeepSeekPipeline:    
     def __init__(self, config: PipelineConfig):
@@ -319,7 +319,7 @@ def main():
         model="deepseek-chat",
         temperature=1.3,
         max_tokens=8192,
-        max_concurrent=3 # Test with 3 for now
+        max_concurrent=10
     )
     
     # Check API key

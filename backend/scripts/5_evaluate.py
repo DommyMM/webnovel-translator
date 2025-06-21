@@ -42,9 +42,9 @@ class EvaluationConfig:
     # Use DeepSeek for evaluation but with different settings for unbiased scoring
     evaluator_model: str = "deepseek-chat"
     temperature: float = 0.2  # Low temp for consistent, objective scoring
-    max_tokens: int = 2048
+    max_tokens: int = 8192  # Max tokens for detailed evaluation
     base_url: str = "https://api.deepseek.com"
-    max_concurrent: int = 3  # Limit concurrent evaluations
+    max_concurrent: int = 10
 
 class AsyncChapterEvaluator:
     """Evaluate translations for a single chapter asynchronously"""
