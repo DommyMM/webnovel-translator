@@ -174,6 +174,10 @@ uv pip install faiss-cpu sentence-transformers langchain langchain-community pan
 
 # Note: faiss-gpu is not yet available for Python 3.12.
 # Using faiss-cpu for now, can recreate with Python 3.10 if needed.
+
+# 6. Download model (one-time, ~16GB)
+huggingface-cli login  # Use your token
+python -c "from huggingface_hub import snapshot_download; snapshot_download('deepseek-ai/DeepSeek-R1-0528-Qwen3-8B')"
 ```
 
 ## Project Structure

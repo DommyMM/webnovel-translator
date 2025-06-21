@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from pathlib import Path
 from datetime import datetime
 from cerebras.cloud.sdk import Cerebras
@@ -63,8 +64,8 @@ Only output the numbered list of rules, nothing else."""
                 {"role": "system", "content": "You are an expert translation analyst specializing in Chinese cultivation novels. Think through what makes a high-quality, actionable translation rule."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.1,  # Low temperature for consistent extraction
-            max_tokens=1500
+            temperature=0.2,  # Low temperature for consistent extraction
+            max_tokens=16382,  # Max tokens for qwen-3-32b for detailed analysis
         )
         
         ai_analysis = response.choices[0].message.content
@@ -175,6 +176,34 @@ def parse_cerebras_response(response_text):         # Parse the raw response fro
                 continue
     
     return rules
+
+def extract_from_existing_analysis():       # Extract rules from the existing cerebras analysis file
+    # Read the existing analysis
+    with open("cerebras_rule_analysis.txt", 'r', encoding='utf-8') as f:
+        content = f.read()
+    
+    print("Extracting rules from existing Cerebras analysis...")
+    print(f"Total content length: {len(content)} characters")
+    
+    # Strip the think tags
+    clean_content = re.sub(r'<think>(.*?)</think>', r'\1', content, flags=re.DOTALL)
+    clean_content = clean_content.replace("Cerebras Rule Analysis", "").replace("=" * 50, "").strip()
+    
+    print(f"Content after removing think tags: {len(clean_content)} characters")
+    print("\nCleaned content:")
+    print("=" * 60)
+    print(clean_content)
+    
+    # Save the cleaned thinking for manual review
+    with open("cerebras_thinking_cleaned.txt", 'w', encoding='utf-8') as f:
+        f.write("Cleaned Cerebras Thinking Process\n")
+        f.write("=" * 40 + "\n\n")
+        f.write(clean_content)
+    
+    print(f"\nCleaned thinking saved to: cerebras_thinking_cleaned.txt")
+    print("Review this file to see what Cerebras actually analyzed")
+    
+    return clean_content
 
 def main():    
     # Check Cerebras API key
