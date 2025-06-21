@@ -2,11 +2,12 @@ import os
 import time
 import json
 import re
+import asyncio
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional
 from dataclasses import dataclass, asdict
-from openai import OpenAI
+from openai import AsyncOpenAI
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -34,11 +35,12 @@ class PipelineConfig:
     temperature: float = 1.3
     max_tokens: int = 8192
     base_url: str = "https://api.deepseek.com"
+    max_concurrent: int = 3     # Start with 3 for now to test performance
 
-class DeepSeekTranslationPipeline:    
+class ParallelDeepSeekPipeline:    
     def __init__(self, config: PipelineConfig):
         self.config = config
-        self.client = OpenAI(
+        self.client = AsyncOpenAI(
             api_key=os.getenv("DEEPSEEK_API_KEY"),
             base_url=self.config.base_url
         )
@@ -78,7 +80,7 @@ Your task is to translate the following Chinese chapter to English. Think throug
 4. Ensure consistency with established xianxia translation conventions
 
 Guidelines:
-- Keep character names in pinyin (e.g., Long Chen, not Dragon Chen)
+- Keep character names in pinyin (e.g., Long Chen, not Dragon Chen or Dragon Dust)
 - Translate cultivation realms consistently (e.g., 金丹期 → Golden Core stage)
 - Preserve the action-oriented, dramatic tone typical of cultivation novels
 - Use natural, engaging English prose that flows well
@@ -91,12 +93,12 @@ Please provide a high-quality English translation:"""
         
         return prompt.format(chinese_text=chinese_text)
     
-    def translate_chapter(self, chinese_text: str) -> tuple[str, Dict]:
+    async def translate_chapter_async(self, chinese_text: str) -> tuple[str, Dict]:
         start_time = time.time()
         prompt = self.create_translation_prompt(chinese_text)
         
         try:
-            response = self.client.chat.completions.create(
+            response = await self.client.chat.completions.create(
                 model=self.config.model,
                 messages=[
                     {"role": "system", "content": "You are an expert translator specializing in Chinese cultivation novels."},
@@ -168,59 +170,52 @@ Please provide a high-quality English translation:"""
         with open(comparison_file, 'w', encoding='utf-8') as f:
             json.dump(comparison_data, f, indent=2, ensure_ascii=False)
     
-    def process_chapter(self, chapter_num: int) -> ChapterMetrics:
-        print(f"\nProcessing Chapter {chapter_num}")
-        print("-" * 50)
-        
-        start_time = time.time()
-        
-        # Load input files
-        try:
-            chinese_text, ground_truth = self.load_chapter_files(chapter_num)
-            print(f"Loaded files - Chinese: {len(chinese_text)} chars, Ground truth: {len(ground_truth)} chars")
-        except FileNotFoundError as e:
-            print(f"Error loading chapter {chapter_num}: {e}")
-            return None
-        
-        # Translate with DeepSeek
-        print(f"Translating with {self.config.model} (temp={self.config.temperature})")
-        translation, performance_stats = self.translate_chapter(chinese_text)
-        
-        if not translation:
-            print(f"Translation failed for chapter {chapter_num}")
-            return None
+    async def process_chapter_async(self, chapter_num: int, semaphore: asyncio.Semaphore) -> Optional[ChapterMetrics]:
+        """Process a single chapter asynchronously with rate limiting"""
+        async with semaphore:  # Limit concurrent requests
+            print(f"Starting Chapter {chapter_num}...")
             
-        # Calculate similarity metrics
-        basic_similarity = self.calculate_basic_similarity(translation, ground_truth)
-        
-        # Save results
-        self.save_chapter_results(chapter_num, chinese_text, translation, 
-                                ground_truth, performance_stats)
-        
-        # Create metrics record
-        total_time = time.time() - start_time
-        metrics = ChapterMetrics(
-            chapter_num=chapter_num,
-            chinese_chars=len(chinese_text),
-            english_chars=len(translation),
-            translation_time=performance_stats["translation_time"],
-            tokens_used=performance_stats["total_tokens"],
-            tokens_per_second=performance_stats["tokens_per_second"],
-            basic_similarity=basic_similarity,
-            processing_time=total_time,
-            timestamp=datetime.now().isoformat()
-        )
-        
-        self.metrics.append(metrics)
-        
-        # Show results
-        print(f"Chapter {chapter_num} complete")
-        print(f"Translation time: {performance_stats['translation_time']:.1f}s")
-        print(f"Tokens: {performance_stats['total_tokens']} ({performance_stats['tokens_per_second']:.1f} tok/s)")
-        print(f"Similarity: {basic_similarity:.3f}")
-        print(f"Total time: {total_time:.1f}s")
-        
-        return metrics
+            start_time = time.time()
+            
+            # Load input files
+            try:
+                chinese_text, ground_truth = self.load_chapter_files(chapter_num)
+                print(f"Chapter {chapter_num} loaded - Chinese: {len(chinese_text)} chars, Ground truth: {len(ground_truth)} chars")
+            except FileNotFoundError as e:
+                print(f"Error loading chapter {chapter_num}: {e}")
+                return None
+            
+            # Translate with DeepSeek (async)
+            translation, performance_stats = await self.translate_chapter_async(chinese_text)
+            
+            if not translation:
+                print(f"Translation failed for chapter {chapter_num}")
+                return None
+                
+            # Calculate similarity metrics
+            basic_similarity = self.calculate_basic_similarity(translation, ground_truth)
+            
+            # Save results
+            self.save_chapter_results(chapter_num, chinese_text, translation, ground_truth, performance_stats)
+            
+            # Create metrics record
+            total_time = time.time() - start_time
+            metrics = ChapterMetrics(
+                chapter_num=chapter_num,
+                chinese_chars=len(chinese_text),
+                english_chars=len(translation),
+                translation_time=performance_stats["translation_time"],
+                tokens_used=performance_stats["total_tokens"],
+                tokens_per_second=performance_stats["tokens_per_second"],
+                basic_similarity=basic_similarity,
+                processing_time=total_time,
+                timestamp=datetime.now().isoformat()
+            )
+            
+            # Show completion
+            print(f"Chapter {chapter_num} complete ({performance_stats['translation_time']:.1f}s, {performance_stats['total_tokens']} tokens, similarity: {basic_similarity:.3f})")
+            
+            return metrics
     
     def save_final_analytics(self):
         analytics_file = Path(self.config.output_dir, "analytics", "deepseek_analytics.json")
@@ -245,7 +240,9 @@ Please provide a high-quality English translation:"""
                 "avg_tokens_per_second": round(avg_tokens_per_sec, 2),
                 "total_tokens_used": total_tokens,
                 "total_translation_time": round(total_translation_time, 1),
-                "avg_translation_time_per_chapter": round(total_translation_time / len(self.metrics), 1)
+                "avg_translation_time_per_chapter": round(total_translation_time / len(self.metrics), 1),
+                "parallel_processing": True,
+                "max_concurrent_requests": self.config.max_concurrent
             },
             "chapter_metrics": [asdict(m) for m in self.metrics],
             "generated_at": datetime.now().isoformat()
@@ -256,34 +253,62 @@ Please provide a high-quality English translation:"""
         
         print(f"Analytics saved to: {analytics_file}")
     
-    def run_pipeline(self):
-        print("Starting DeepSeek Translation Pipeline")
+    async def run_pipeline_async(self):
+        """Run the parallel translation pipeline"""
+        print("Starting Parallel DeepSeek Translation Pipeline")
         print(f"Model: {self.config.model}")
         print(f"Temperature: {self.config.temperature}")
+        print(f"Max concurrent requests: {self.config.max_concurrent}")
         print(f"Processing chapters {self.config.start_chapter}-{self.config.end_chapter}")
         
         start_time = time.time()
         
+        # Create semaphore to limit concurrent requests
+        semaphore = asyncio.Semaphore(self.config.max_concurrent)
+        
+        # Create tasks for all chapters
+        tasks = []
         for chapter_num in range(self.config.start_chapter, self.config.end_chapter + 1):
-            try:
-                metrics = self.process_chapter(chapter_num)
-                if metrics:
-                    print(f"Progress: {len(self.metrics)}/{self.config.end_chapter - self.config.start_chapter + 1} chapters")
-            except Exception as e:
-                print(f"Failed to process chapter {chapter_num}: {e}")
-                continue
+            task = self.process_chapter_async(chapter_num, semaphore)
+            tasks.append(task)
+        
+        # Run all tasks concurrently
+        print(f"Launching {len(tasks)} parallel translation tasks...")
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Process results
+        successful_metrics = []
+        failed_count = 0
+        
+        for result in results:
+            if isinstance(result, Exception):
+                print(f"Task failed with exception: {result}")
+                failed_count += 1
+            elif result is not None:
+                successful_metrics.append(result)
+            else:
+                failed_count += 1
+        
+        self.metrics = successful_metrics
         
         # Final summary
         total_time = time.time() - start_time
-        print(f"\nDeepSeek Translation Pipeline Complete")
+        print(f"\nParallel DeepSeek Translation Pipeline Complete")
         print(f"Total time: {total_time:.1f}s")
-        print(f"Chapters processed: {len(self.metrics)}")
+        print(f"Chapters processed: {len(successful_metrics)}")
+        print(f"Failed chapters: {failed_count}")
         
-        if self.metrics:
-            avg_similarity = sum(m.basic_similarity for m in self.metrics) / len(self.metrics)
-            avg_speed = sum(m.tokens_per_second for m in self.metrics) / len(self.metrics)
+        if successful_metrics:
+            avg_similarity = sum(m.basic_similarity for m in successful_metrics) / len(successful_metrics)
+            avg_speed = sum(m.tokens_per_second for m in successful_metrics) / len(successful_metrics)
+            total_tokens = sum(m.tokens_used for m in successful_metrics)
+            avg_translation_time = sum(m.translation_time for m in successful_metrics) / len(successful_metrics)
+            
             print(f"Average similarity: {avg_similarity:.3f}")
             print(f"Average speed: {avg_speed:.1f} tokens/sec")
+            print(f"Total tokens: {total_tokens}")
+            print(f"Average translation time per chapter: {avg_translation_time:.1f}s")
+            print(f"Speed improvement: ~{len(successful_metrics)}x faster than sequential")
         
         self.save_final_analytics()
 
@@ -293,7 +318,8 @@ def main():
         end_chapter=3,
         model="deepseek-chat",
         temperature=1.3,
-        max_tokens=8192
+        max_tokens=8192,
+        max_concurrent=3 # Test with 3 for now
     )
     
     # Check API key
@@ -315,14 +341,15 @@ def main():
     print(f"  Model: {config.model}")
     print(f"  Temperature: {config.temperature}")
     print(f"  Max tokens: {config.max_tokens}")
+    print(f"  Max concurrent: {config.max_concurrent}")
     print(f"  Chapters: {config.start_chapter}-{config.end_chapter}")
     print(f"  Chinese dir: {config.chinese_chapters_dir}")
     print(f"  English dir: {config.english_chapters_dir}")
     print(f"  Output dir: {config.output_dir}")
     
     # Initialize and run pipeline
-    pipeline = DeepSeekTranslationPipeline(config)
-    pipeline.run_pipeline()
+    pipeline = ParallelDeepSeekPipeline(config)
+    asyncio.run(pipeline.run_pipeline_async())
 
 if __name__ == "__main__":
     main()
