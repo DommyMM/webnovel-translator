@@ -4,19 +4,45 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict
 from collections import defaultdict, Counter
-from dotenv import load_dotenv
+import chromadb
+from chromadb.utils import embedding_functions
 
-load_dotenv()
-
-class TerminologyDatabaseBuilder:
+class ChromaTerminologyBuilder:
     def __init__(self):
         self.input_file = "../data/terminology/extracted_terminology.json"
-        self.output_file = "../data/terminology/rag_database.json"
-        self.readable_file = "../data/terminology/rag_database_readable.txt"
+        self.db_path = "../data/terminology/chroma_db"
+        self.readable_file = "../data/terminology/chroma_terminology_readable.txt"
         self.setup_directories()
+        self.setup_chromadb()
     
     def setup_directories(self):
         Path("../data/terminology").mkdir(exist_ok=True, parents=True)
+        Path(self.db_path).mkdir(exist_ok=True, parents=True)
+    
+    def setup_chromadb(self):
+        print("Setting up ChromaDB...")
+        
+        # Create persistent client
+        self.client = chromadb.PersistentClient(path=self.db_path)
+        
+        # Use multilingual embedding function for Chinese/English
+        self.embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
+            model_name="paraphrase-multilingual-MiniLM-L12-v2"
+        )
+        
+        # Get or create collection
+        self.collection = self.client.get_or_create_collection(
+            name="cultivation_terminology",
+            embedding_function=self.embedding_function,
+            metadata={
+                "description": "Chinese cultivation novel terminology mappings",
+                "created_at": datetime.now().isoformat(),
+                "language_pair": "Chinese-English"
+            }
+        )
+        
+        print(f"ChromaDB collection ready: {self.collection.name}")
+        print(f"Database path: {self.db_path}")
     
     def load_extracted_terminology(self) -> Dict:
         if not Path(self.input_file).exists():
@@ -28,10 +54,9 @@ class TerminologyDatabaseBuilder:
         print(f"Loaded extracted terminology with {data['metadata']['total_terms']} terms")
         return data
     
-    def clean_and_merge_terminology(self, raw_data: Dict) -> Dict:
+    def clean_and_prepare_terminology(self, raw_data: Dict) -> Dict:
         raw_terminology = raw_data.get("terminology", {})
         
-        # Build clean database
         clean_db = {}
         category_counts = Counter()
         frequency_stats = []
@@ -47,15 +72,10 @@ class TerminologyDatabaseBuilder:
             chinese_term = chinese_term.strip()
             professional_term = professional_term.strip()
             
-            # Skip empty or invalid entries
-            if not chinese_term or not professional_term:
+            # Skip empty or single character terms
+            if not chinese_term or not professional_term or len(chinese_term) < 2:
                 continue
             
-            # Skip single character terms (usually not important)
-            if len(chinese_term) < 2:
-                continue
-            
-            # Build clean entry
             clean_entry = {
                 "english_term": professional_term,
                 "category": category,
@@ -71,7 +91,6 @@ class TerminologyDatabaseBuilder:
             category_counts[category] += 1
             frequency_stats.append(frequency)
         
-        # Build metadata
         metadata = {
             "created_at": datetime.now().isoformat(),
             "total_terms": len(clean_db),
@@ -87,24 +106,75 @@ class TerminologyDatabaseBuilder:
             "terminology": clean_db
         }
     
-    def save_rag_database(self, clean_db: Dict):
-        # Save JSON database
-        with open(self.output_file, 'w', encoding='utf-8') as f:
-            json.dump(clean_db, f, indent=2, ensure_ascii=False)
+    def build_vector_database(self, clean_data: Dict):
+        terminology = clean_data["terminology"]
+        metadata = clean_data["metadata"]
         
-        # Save human-readable version
-        terminology = clean_db["terminology"]
-        metadata = clean_db["metadata"]
+        print(f"Building vector database with {len(terminology)} terms...")
+        # Prepare data for ChromaDB
+        chinese_terms = []
+        metadatas = []
+        ids = []
+        
+        for i, (chinese_term, data) in enumerate(terminology.items()):
+            chinese_terms.append(chinese_term)
+            
+            metadatas.append({
+                "english_term": data["english_term"],
+                "category": data["category"],
+                "frequency": data["frequency"],
+                "confidence": data["confidence"],
+                "chapters_seen": ",".join(map(str, data["chapters_seen"])),
+                "first_seen": data["first_seen"],
+                "last_seen": data["last_seen"],
+                "created_at": data["created_at"]
+            })
+            
+            ids.append(f"term_{i:04d}")
+        
+        # Add to ChromaDB - automatically embeds chinese_terms
+        print("Embedding Chinese terms and storing in ChromaDB...")
+        self.collection.upsert(
+            documents=chinese_terms,  # Chinese terms get embedded automatically
+            metadatas=metadatas,      # English terms + metadata stored here
+            ids=ids
+        )
+        
+        print(f"Vector database built successfully!")
+        print(f"   - Total terms: {len(chinese_terms)}")
+        print(f"   - Embeddings: {len(chinese_terms)} Chinese terms")
+        print(f"   - Metadata: English translations + categories")
+        print(f"   - Auto-saved to: {self.db_path}")
+        
+        return {
+            "database_path": self.db_path,
+            "collection_name": self.collection.name,
+            "total_terms": len(chinese_terms),
+            "categories": metadata["categories"],
+            "embedding_model": "paraphrase-multilingual-MiniLM-L12-v2"
+        }
+    
+    def save_readable_summary(self, clean_data: Dict, db_info: Dict):
+        terminology = clean_data["terminology"]
+        metadata = clean_data["metadata"]
         
         with open(self.readable_file, 'w', encoding='utf-8') as f:
-            f.write("PRODUCTION RAG TERMINOLOGY DATABASE\n")
+            f.write("CHROMADB VECTOR TERMINOLOGY DATABASE\n")
             f.write("=" * 60 + "\n\n")
-            f.write(f"Total terms: {metadata['total_terms']}\n")
+            f.write(f"Database path: {db_info['database_path']}\n")
+            f.write(f"Collection name: {db_info['collection_name']}\n")
+            f.write(f"Embedding model: {db_info['embedding_model']}\n")
+            f.write(f"Total terms: {db_info['total_terms']}\n")
             f.write(f"Chapters covered: {metadata['chapters_covered']}\n")
             f.write(f"Average frequency: {metadata['avg_frequency']:.1f}\n")
             f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
             
-            # Group by category
+            f.write("CATEGORIES:\n")
+            for category, count in sorted(db_info['categories'].items()):
+                f.write(f"  {category}: {count} terms\n")
+            f.write("\n")
+            
+            # Group by category for readable display
             by_category = defaultdict(list)
             for chinese_term, data in terminology.items():
                 by_category[data["category"]].append((chinese_term, data))
@@ -124,98 +194,66 @@ class TerminologyDatabaseBuilder:
                     
                     f.write(f"{chinese_term:15} → {english_term:30} (freq: {frequency}, chs: {chapter_range})\n")
         
-        print(f"RAG database saved to: {self.output_file}")
-        print(f"Readable version saved to: {self.readable_file}")
+        print(f"Readable summary saved to: {self.readable_file}")
     
-    def show_database_preview(self, clean_db: Dict):
-        terminology = clean_db["terminology"]
-        metadata = clean_db["metadata"]
+    def test_database_setup(self):
+        print("\nTesting ChromaDB setup...")
         
-        print(f"\nRAG DATABASE PREVIEW:")
-        print("=" * 50)
-        print(f"Total terms: {metadata['total_terms']}")
-        print(f"Categories: {metadata['categories']}")
+        # Check collection exists
+        collections = self.client.list_collections()
+        print(f"Available collections: {collections}")
         
-        # Show top 10 most frequent terms
-        terms_by_freq = sorted(
-            terminology.items(),
-            key=lambda x: x[1]["frequency"],
-            reverse=True
-        )
+        # Check collection contents
+        count = self.collection.count()
+        print(f"Total documents in collection: {count}")
         
-        print(f"\nTOP 10 MOST FREQUENT TERMS:")
-        print("-" * 40)
-        for i, (chinese_term, data) in enumerate(terms_by_freq[:10]):
-            english_term = data["english_term"]
-            frequency = data["frequency"]
-            category = data["category"]
-            print(f"{i+1:2d}. {chinese_term:12} → {english_term:20} ({category}, freq: {frequency})")
-
-def test_rag_query(rag_db_file: str):
-    if not Path(rag_db_file).exists():
-        print("RAG database not found for testing")
-        return
-    
-    with open(rag_db_file, 'r', encoding='utf-8') as f:
-        rag_data = json.load(f)
-    
-    terminology = rag_data["terminology"]
-    
-    # Test with actual terms from the database
-    test_terms = list(terminology.keys())[:5]  # First 5 terms from database
-    
-    print(f"\nRAG QUERY TEST:")
-    print("=" * 40)
-    print("Sample chapter terms: " + ", ".join(test_terms))
-    print("\nRAG lookup results:")
-    
-    found_terms = {}
-    for term in test_terms:
-        if term in terminology:
-            found_terms[term] = terminology[term]["english_term"]
-            print(f"  {term} → {terminology[term]['english_term']}")
-        else:
-            print(f"  {term} → (not found)")
-    
-    print(f"\nTerminology injection for translation:")
-    print("TERMINOLOGY (use these exact translations):")
-    for cn, en in found_terms.items():
-        print(f"  {cn} → {en}")
-    
-    return found_terms
+        if count > 0:
+            # Peek at first few items
+            sample = self.collection.peek(limit=3)
+            print(f"\nSample data:")
+            for i, (doc, metadata) in enumerate(zip(sample['documents'], sample['metadatas'])):
+                print(f"  {i+1}. {doc} → {metadata['english_term']} ({metadata['category']})")
+        
+        print("Database test complete!")
 
 def main():
-    print("Step 6: Building Production RAG Database")
+    print("Step 6: Building ChromaDB Vector Terminology Database")
     print("=" * 60)
     
-    builder = TerminologyDatabaseBuilder()
+    builder = ChromaTerminologyBuilder()
     
     try:
-        # Load extracted terminology
+        # Load extracted terminology from step 5
+        print("Loading extracted terminology from step 5...")
         raw_data = builder.load_extracted_terminology()
         
-        # Clean and merge
-        print("Cleaning and merging terminology...")
-        clean_db = builder.clean_and_merge_terminology(raw_data)
+        # Clean and prepare for vector database
+        print("Cleaning and preparing terminology...")
+        clean_data = builder.clean_and_prepare_terminology(raw_data)
         
-        # Show preview
-        builder.show_database_preview(clean_db)
+        # Build ChromaDB vector database
+        print("Building ChromaDB vector database...")
+        db_info = builder.build_vector_database(clean_data)
         
-        # Save database
-        print("\nSaving RAG database...")
-        builder.save_rag_database(clean_db)
+        # Save human-readable summary
+        print("Saving readable summary...")
+        builder.save_readable_summary(clean_data, db_info)
         
-        # Test the database
-        print("\nTesting RAG queries...")
-        test_rag_query(builder.output_file)
+        # Test database
+        builder.test_database_setup()
         
-        print(f"\nRAG Database Build Complete!")
-        print(f"Database ready for use in translation pipeline")
+        print(f"\nChromaDB Vector Database Build Complete!")
+        print(f"Vector database ready for step 7 (final translation)")
+        print(f"Database location: {builder.db_path}")
         
     except FileNotFoundError as e:
         print(f"Error: {e}")
         print("Please run terminology extraction first:")
         print("  python 5_extract_terminology.py --start 1 --end 3")
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
     main()

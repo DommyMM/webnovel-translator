@@ -113,7 +113,7 @@ What You Care About (as a Western cultivation novel reader):
 - Character Personality: Do characters feel real and consistent?  
 - Story Enjoyment: Can you follow the action and get invested?
 - Proper Cultivation Terms: Do terms like "Spiritual Strength" feel right?
-- Western Style: Written for Western readers colloquially, not literal translation
+- Western Style: Written for Western readers colloquially, not literal translationpi
 
 Scoring Scale:
 - 95-100%: Perfect - reads like a professional English novel

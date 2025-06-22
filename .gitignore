@@ -6,3 +6,4 @@
 clean/
 ground_truth/
 raw/
+chroma_db*/
