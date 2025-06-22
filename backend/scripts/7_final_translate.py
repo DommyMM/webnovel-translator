@@ -1,4 +1,5 @@
 import asyncio
+import concurrent.futures
 import time
 import json
 import os
@@ -167,6 +168,88 @@ class ChromaRAGQuerySystem:
     def query_chapter(self, chinese_text: str) -> Dict[str, str]:
         return self.query_terminology(chinese_text)
 
+    def query_terminology_parallel(self, chinese_text: str, max_results: int = 10, similarity_threshold: float = 0.2, max_workers: int = 8) -> Dict[str, str]:
+        if not chinese_text.strip():
+            return {}
+        
+        try:
+            # Chunk text into lines
+            lines = chunk_chinese_text_by_lines(chinese_text)
+            print(f"Split text into {len(lines)} lines for parallel RAG query")
+            
+            all_terminology = {}
+            
+            # Process lines in parallel using ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # Submit all line queries concurrently
+                future_to_line = {
+                    executor.submit(self._query_single_line, i, line, max_results, similarity_threshold): (i, line)
+                    for i, line in enumerate(lines) if len(line.strip()) >= 5
+                }
+                
+                # Collect results as they complete
+                for future in concurrent.futures.as_completed(future_to_line):
+                    i, line = future_to_line[future]
+                    try:
+                        line_terminology = future.result()
+                        
+                        # Merge results, keeping highest similarity for duplicates
+                        for chinese_term, (english_term, similarity) in line_terminology.items():
+                            if chinese_term not in all_terminology or similarity > all_terminology[chinese_term][1]:
+                                all_terminology[chinese_term] = (english_term, similarity)
+                                print(f"Found: {chinese_term} → {english_term} (similarity: {similarity:.3f}) [Line {i+1}]")
+                                
+                    except Exception as e:
+                        print(f"Error processing line {i+1}: {e}")
+                        continue
+            
+            # Convert to final format (remove similarity scores)
+            final_terminology = {chinese: english for chinese, (english, _) in all_terminology.items()}
+            
+            print(f"Retrieved {len(final_terminology)} terminology mappings total (parallel processing)")
+            return final_terminology
+            
+        except Exception as e:
+            print(f"Error in parallel ChromaDB query: {e}")
+            return {}
+    
+    def _query_single_line(self, line_index: int, line: str, max_results: int, similarity_threshold: float) -> Dict[str, Tuple[str, float]]:
+        """
+        Query a single line against ChromaDB
+        Returns dict of {chinese_term: (english_term, similarity)}
+        """
+        line_terminology = {}
+        
+        try:
+            results = self.collection.query(
+                query_texts=[line],
+                n_results=max_results,
+                include=['documents', 'metadatas', 'distances']
+            )
+            
+            for doc, metadata, distance in zip(
+                results['documents'][0], 
+                results['metadatas'][0], 
+                results['distances'][0]
+            ):
+                chinese_term = doc
+                english_term = metadata['english_term']
+                similarity = 1.0 - distance
+                
+                if similarity >= similarity_threshold:
+                    line_terminology[chinese_term] = (english_term, similarity)
+                    
+        except Exception as e:
+            # Don't print here to avoid thread collision in logs
+            pass
+            
+        return line_terminology
+    
+    # Keep the original method as fallback
+    def query_terminology(self, chinese_text: str, max_results: int = 10, similarity_threshold: float = 0.2) -> Dict[str, str]:
+        """Use parallel version by default"""
+        return self.query_terminology_parallel(chinese_text, max_results, similarity_threshold)
+
 class AsyncFinalTranslator:
     def __init__(self, chapter_num: int, rules: List[str], shared_rag=None):
         self.chapter_num = chapter_num
@@ -242,9 +325,9 @@ Please provide a high-quality English translation following the rules and termin
             return f"Translation failed: {e}"
     
     async def process_chapter_async(self, semaphore):
-        """Process a single chapter with RAG and rules"""
+        """Process a single chapter with parallel RAG and rules"""
         async with semaphore:
-            print(f"Starting Chapter {self.chapter_num} final translation (Rules + ChromaRAG)")
+            print(f"Starting Chapter {self.chapter_num} final translation (Rules + Parallel ChromaRAG)")
             
             start_time = time.time()
             
@@ -256,10 +339,23 @@ Please provide a high-quality English translation following the rules and termin
                 print(f"Chapter {self.chapter_num}: Error loading: {e}")
                 return None
             
-            # Query ChromaDB for relevant terminology using line-by-line chunking
-            print(f"Chapter {self.chapter_num}: Querying ChromaDB for terminology (line-by-line)")
-            terminology = self.rag.query_terminology(chinese_text, max_results=10, similarity_threshold=0.2)  # ← Changed from 0.4 to 0.2
-            print(f"Chapter {self.chapter_num}: Found {len(terminology)} RAG mappings")
+            # Query ChromaDB for relevant terminology using parallel line-by-line chunking
+            print(f"Chapter {self.chapter_num}: Querying ChromaDB for terminology (parallel processing)")
+            rag_start = time.time()
+            
+            # Run RAG query in thread pool to avoid blocking async loop
+            loop = asyncio.get_event_loop()
+            terminology = await loop.run_in_executor(
+                None, 
+                self.rag.query_terminology_parallel, 
+                chinese_text, 
+                10,  # max_results
+                0.2, # similarity_threshold  
+                8    # max_workers for your 7800X3D
+            )
+            
+            rag_elapsed = time.time() - rag_start
+            print(f"Chapter {self.chapter_num}: Found {len(terminology)} RAG mappings in {rag_elapsed:.1f}s")
             
             if terminology:
                 print(f"Chapter {self.chapter_num}: Sample terminology: {dict(list(terminology.items())[:3])}")
@@ -273,7 +369,7 @@ Please provide a high-quality English translation following the rules and termin
                 f.write(translation)
             
             elapsed = time.time() - start_time
-            print(f"Chapter {self.chapter_num}: Completed in {elapsed:.1f}s")
+            print(f"Chapter {self.chapter_num}: Completed in {elapsed:.1f}s (RAG: {rag_elapsed:.1f}s)")
             print(f"Chapter {self.chapter_num}: Output length: {len(translation)} chars")
             print(f"Chapter {self.chapter_num}: Saved to: {self.output_file}")
             
@@ -284,7 +380,8 @@ Please provide a high-quality English translation following the rules and termin
                 "chinese_length": len(chinese_text),
                 "translation_length": len(translation),
                 "terminology_count": len(terminology),
-                "elapsed_time": elapsed
+                "elapsed_time": elapsed,
+                "rag_time": rag_elapsed
             }
 
 async def translate_chapters_with_rag(start_chapter: int, end_chapter: int, max_concurrent: int = 3, use_qwen3: bool = True):
