@@ -3,8 +3,7 @@ import time
 import json
 import os
 from pathlib import Path
-from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 import chromadb
 from chromadb.utils import embedding_functions
 from chromadb.utils.embedding_functions import EmbeddingFunction
@@ -12,8 +11,21 @@ from sentence_transformers import SentenceTransformer
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
-# Load environment
 load_dotenv()
+
+
+def chunk_chinese_text_by_lines(text):
+    lines = text.split('\n')
+    
+    # Clean up lines
+    cleaned_lines = []
+    for line in lines:
+        line = line.strip()
+        # Skip empty lines, chapter headers, and very short lines
+        if len(line) >= 5 and not line.startswith('第') and not line.startswith('﻿'):
+            cleaned_lines.append(line)
+    
+    return cleaned_lines
 
 class Qwen3EmbeddingFunction(EmbeddingFunction):
     def __init__(self, model_name="Qwen/Qwen3-Embedding-8B"):
@@ -83,13 +95,13 @@ class ChromaRAGQuerySystem:
             print("Available collections:", self.client.list_collections())
             raise
     
-    def query_terminology(self, chinese_text: str, max_results: int = 10, similarity_threshold: float = 0.3) -> Dict[str, str]:
+    def query_terminology(self, chinese_text: str, max_results: int = 10, similarity_threshold: float = 0.2) -> Dict[str, str]:
         """
-        Query ChromaDB for terminology in Chinese text using semantic similarity
+        Query ChromaDB for terminology using line-by-line chunking for better similarity scores
         
         Args:
-            chinese_text: Input Chinese text (sentence/paragraph)
-            max_results: Maximum number of similar terms to return
+            chinese_text: Input Chinese text (full chapter)
+            max_results: Maximum number of similar terms to return per line
             similarity_threshold: Minimum similarity score (0-1)
         
         Returns:
@@ -99,35 +111,54 @@ class ChromaRAGQuerySystem:
             return {}
         
         try:
-            # Query ChromaDB with the entire Chinese text
-            # ChromaDB will find semantically similar Chinese terms in our database
-            results = self.collection.query(
-                query_texts=[chinese_text],
-                n_results=max_results,
-                include=['documents', 'metadatas', 'distances']
-            )
+            # Chunk text into lines for better similarity matching
+            lines = chunk_chinese_text_by_lines(chinese_text)
+            print(f"Split text into {len(lines)} lines for RAG query")
             
-            found_terminology = {}
+            all_terminology = {}
             
-            # Process results
-            for doc, metadata, distance in zip(
-                results['documents'][0], 
-                results['metadatas'][0], 
-                results['distances'][0]
-            ):
-                chinese_term = doc
-                english_term = metadata['english_term']
+            # Query each line separately
+            for i, line in enumerate(lines):
+                if len(line.strip()) < 5:  # Skip very short lines
+                    continue
                 
-                # Convert distance to similarity (ChromaDB uses cosine distance, lower = more similar)
-                similarity = 1.0 - distance
+                try:
+                    # Query ChromaDB with individual line
+                    results = self.collection.query(
+                        query_texts=[line],
+                        n_results=max_results,
+                        include=['documents', 'metadatas', 'distances']
+                    )
+                    
+                    # Process results for this line
+                    for doc, metadata, distance in zip(
+                        results['documents'][0], 
+                        results['metadatas'][0], 
+                        results['distances'][0]
+                    ):
+                        chinese_term = doc
+                        english_term = metadata['english_term']
+                        
+                        # Convert distance to similarity
+                        similarity = 1.0 - distance
+                        
+                        # Apply similarity threshold
+                        if similarity >= similarity_threshold:
+                            # Avoid duplicates - keep highest similarity
+                            if chinese_term not in all_terminology or similarity > all_terminology.get(f"{chinese_term}_sim", 0):
+                                all_terminology[chinese_term] = english_term
+                                all_terminology[f"{chinese_term}_sim"] = similarity
+                                print(f"Found: {chinese_term} → {english_term} (similarity: {similarity:.3f}) [Line {i+1}]")
                 
-                # Apply similarity threshold
-                if similarity >= similarity_threshold:
-                    found_terminology[chinese_term] = english_term
-                    print(f"Found: {chinese_term} → {english_term} (similarity: {similarity:.3f})")
+                except Exception as e:
+                    print(f"Error querying line {i+1}: {e}")
+                    continue
             
-            print(f"Retrieved {len(found_terminology)} terminology mappings")
-            return found_terminology
+            # Clean up - remove the similarity tracking keys
+            final_terminology = {k: v for k, v in all_terminology.items() if not k.endswith('_sim')}
+            
+            print(f"Retrieved {len(final_terminology)} terminology mappings total")
+            return final_terminology
             
         except Exception as e:
             print(f"Error querying ChromaDB: {e}")
@@ -225,9 +256,9 @@ Please provide a high-quality English translation following the rules and termin
                 print(f"Chapter {self.chapter_num}: Error loading: {e}")
                 return None
             
-            # Query ChromaDB for relevant terminology
-            print(f"Chapter {self.chapter_num}: Querying ChromaDB for terminology")
-            terminology = self.rag.query_terminology(chinese_text, max_results=15, similarity_threshold=0.4)
+            # Query ChromaDB for relevant terminology using line-by-line chunking
+            print(f"Chapter {self.chapter_num}: Querying ChromaDB for terminology (line-by-line)")
+            terminology = self.rag.query_terminology(chinese_text, max_results=10, similarity_threshold=0.2)  # ← Changed from 0.4 to 0.2
             print(f"Chapter {self.chapter_num}: Found {len(terminology)} RAG mappings")
             
             if terminology:
