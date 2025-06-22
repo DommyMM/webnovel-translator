@@ -62,7 +62,6 @@ class ChromaRAGQuerySystem:
                 self.embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
                     model_name="paraphrase-multilingual-MiniLM-L12-v2"
                 )
-                self.collection_name = "basic_terminology"
         else:
             self.embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
                 model_name="paraphrase-multilingual-MiniLM-L12-v2"
