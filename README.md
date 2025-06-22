@@ -2,17 +2,17 @@
 
 A self-improving Chinese-to-English translation pipeline specifically designed for web novels, combining rule-based consistency with RAG terminology precision for optimal translation quality.
 
-## Current Status: Production-Ready Hybrid System
+## Current Status: Functional but WiP
 
 **Working Components:**
-- **Rule Learning**: Extracts style/structure patterns from professional translations
+- **Rule Learning**: Extracts style/structure patterns from professional translations via AI comparison
 - **Rule Application**: Applies 10 high-quality rules for consistent translation style  
-- **RAG Terminology**: Vector database for exact cultivation term mappings
-- **Pattern Extrapolation**: Learns cultivation patterns (realms, techniques, titles)
-- **Evaluation Pipeline**: AI-powered quality assessment with detailed metrics
-- **Cost Optimization**: DeepSeek context caching for 60% cost reduction
+- **RAG Terminology**: Database for exact cultivation term mappings with pattern matching
+- **Pattern Extrapolation**: Learns cultivation patterns (realms, techniques, titles) from ground truth
+- **Evaluation Pipeline**: AI-powered quality assessment comparing baseline vs final translations
+- **Async Processing**: Concurrent translation and evaluation for 3x+ speed improvement
 
-**Performance**: 31 point average improvement over baseline, with 90% translation quality scores
+**Performance**: Consistent terminology application with 6-8 RAG terms per chapter, ~90s translation time per chapter
 
 ---
 
@@ -21,7 +21,7 @@ A self-improving Chinese-to-English translation pipeline specifically designed f
 Traditional LLM translation suffers from inconsistent terminology and style drift, especially in domain-specific content like cultivation novels. This system builds a living knowledge base that combines:
 
 1. **Style Rules** - Learned patterns for tone, pacing, structure from professional translations
-2. **Terminology RAG** - Vector database ensuring "丹帝 → Pill God" consistency
+2. **Terminology RAG** - Database ensuring "丹帝 → Pill God" consistency
 3. **Pattern Learning** - Automatic extrapolation for new terms (凝气期 → Qi Condensation stage)
 
 ## Architecture Overview
@@ -29,14 +29,16 @@ Traditional LLM translation suffers from inconsistent terminology and style drif
 ### **Hybrid Translation Pipeline**
 ```
 Chinese Input
-    ↓ (Async DeepSeek + Context Caching)
+    ↓ (Async DeepSeek)
 Baseline Translation 
-    ↓ (Compare with Ground Truth)
+    ↓ (AI Comparison with Ground Truth)
 Style Rules Extraction 
     ↓ (Cerebras AI Cleaning)
 Clean Style Rules 
-    ↓ (RAG Terminology Lookup)
-RAG + Rules Enhanced Translation 
+    ↓ (Terminology Extraction & Cleaning)
+RAG Terminology Database
+    ↓ (Rules + RAG Application)
+Final Enhanced Translation 
     ↓ (AI Quality Evaluation)
 Quality Improvement Metrics
 ```
@@ -83,22 +85,25 @@ rag_mappings = {
 │   │   ├── cleaned.json           # Filtered actionable rules
 │   │   └── analysis/              # AI analysis outputs
 │   └── terminology/
-│       ├── core_terms.json       # RAG terminology database
-│       ├── patterns.json          # Cultivation patterns (realms, techniques)
-│       └── vectors/               # Vector embeddings for similarity
+│       ├── extracted_terminology.json  # Raw terminology differences
+│       ├── rag_database.json          # Clean RAG terminology database
+│       └── raw_responses/             # AI extraction responses
 ├── scripts/
-│   ├── 1_baseline_translate.py    # Baseline translation pipeline
-│   ├── 2_extract_rules.py         # Style rule learning
-│   ├── 3_clean_rules.py           # AI-powered rule refinement
-│   ├── 4_enhanced_translate.py    # RAG + Rules translation
-│   ├── 5_evaluate.py              # Quality assessment
-│   ├── 6_build_rag.py             # Build terminology database
-│   └── scrape/                    # Data collection tools
+│   ├── 1_baseline_translate.py     # Baseline translation pipeline
+│   ├── 2_extract_rules.py          # Style rule learning via AI comparison
+│   ├── 3_clean_rules.py            # AI-powered rule refinement
+│   ├── 4_enhanced_translate.py     # Rules-only translation
+│   ├── 5_extract_terminology.py    # Extract terminology differences
+│   ├── 6_clean_terms.py            # Build clean RAG database
+│   ├── 7_final_translate.py        # Final Rules + RAG translation
+│   ├── 8_evaluate.py               # Quality assessment pipeline
+│   └── scrape/                     # Data collection tools
 ├── results/
-│   ├── baseline/                  # Initial translation results
-│   ├── enhanced/                  # Improved translation results
-│   └── evaluation/                # Comparative analysis
-└── temp/                          # Temporary files and logs
+│   ├── baseline/                   # Initial translation results
+│   ├── enhanced/                   # Rules-only translation results
+│   ├── final/                      # Rules + RAG translation results
+│   └── evaluation_complete/        # Comparative analysis
+└── temp/                           # Temporary files and logs
 ```
 
 ## Complete Workflow
@@ -112,40 +117,46 @@ python scripts/scrape/scrape.py
 python scripts/scrape/clean.py
 ```
 
-### 2. Build RAG Terminology Database
+### 2. Baseline Translation
 ```bash
-# Extract term mappings from ground truth
-python scripts/6_build_rag.py --extract-terms
-
-# Build vector database for semantic similarity
-python scripts/6_build_rag.py --build-vectors
+# Translate chapters with DeepSeek API
+python scripts/1_baseline_translate.py --start 1 --end 10 --concurrent 5
 ```
 
-### 3. Baseline Translation
-```bash
-# Translate chapters with DeepSeek API (cached prompts)
-python scripts/1_baseline_translate.py --start 1 --end 10
-```
-
-### 4. Rule Learning  
+### 3. Rule Learning  
 ```bash
 # Extract style rules by comparing with ground truth
-python scripts/2_extract_rules.py --start 1 --end 10
+python scripts/2_extract_rules.py --start 1 --end 10 --concurrent 3
 
 # Clean and filter rules with Cerebras AI
 python scripts/3_clean_rules.py
 ```
 
-### 5. Enhanced Translation (Rules + RAG)
+### 4. Enhanced Translation (Rules Only)
 ```bash
-# Re-translate with learned rules + RAG terminology
-python scripts/4_enhanced_translate.py --start 1 --end 10
+# Re-translate with learned rules only
+python scripts/4_enhanced_translate.py --start 1 --end 10 --concurrent 3
 ```
 
-### 6. Quality Evaluation
+### 5. Terminology Extraction
 ```bash
-# Comprehensive quality assessment
-python scripts/5_evaluate.py --start 1 --end 10
+# Extract terminology differences via AI comparison
+python scripts/5_extract_terminology.py --start 1 --end 10 --concurrent 2
+
+# Build clean RAG terminology database
+python scripts/6_clean_terms.py
+```
+
+### 6. Final Translation (Rules + RAG)
+```bash
+# Final translation with rules + RAG terminology
+python scripts/7_final_translate.py --start 1 --end 10 --concurrent 3
+```
+
+### 7. Quality Evaluation
+```bash
+# Comprehensive quality assessment: Baseline vs Final
+python scripts/8_evaluate.py --start 1 --end 10 --concurrent 3
 ```
 
 ## Key Innovations
@@ -172,96 +183,98 @@ TERMINOLOGY: {rag_lookup}
 CHINESE: {input_text}"""
 ```
 
-### 2. **Pattern Learning & Extrapolation**
+### 2. **AI-Powered Learning Pipeline**
 ```python
-# RAG learns cultivation patterns automatically
-realm_pattern = [
-    "金丹期 → Golden Core stage",
-    "筑基期 → Foundation Establishment stage",
-    "元婴期 → Nascent Soul stage"
-]
+# Extract differences by comparing translations
+enhanced_vs_ground_truth = ai_compare(enhanced_translation, ground_truth)
 
-# New term: "凝气期" (never seen before)
-# RAG provides pattern context → AI learns → "Qi Condensation stage"
+# Clean and validate with AI
+clean_rules = cerebras_clean(raw_extracted_rules)
+clean_terminology = validate_terminology(raw_terminology_differences)
+
+# Apply in final translation
+final_translation = translate_with_rules_and_rag(chinese_text, clean_rules, clean_terminology)
 ```
 
-### 3. **Cost-Optimized Context Caching**
+### 3. **Async Processing Architecture**
 ```python
-# Fixed prompt cached across all translations (90% cache hit rate)
-CACHED_PROMPT = """TRANSLATION RULES: [10 style rules]
-CORE TERMINOLOGY: [100 most common terms]"""
+# Concurrent processing across multiple chapters
+async def process_chapters(chapter_range):
+    semaphore = asyncio.Semaphore(max_concurrent)
+    tasks = [process_chapter_async(ch, semaphore) for ch in chapters]
+    results = await asyncio.gather(*tasks)
+    return results
 
-# Variable content per chapter (not cached)  
-variable_content = f"CHAPTER TERMS: {rag_terms}\nCHINESE: {chapter}"
-
-# Result: 60%+ cost reduction via DeepSeek context caching
+# Result: 3x+ speed improvement over sequential processing
 ```
 
 ## Tech Stack
 
 ### **APIs & Models**
-- **DeepSeek V3**: Primary translation engine with context caching
-- **Cerebras**: Rule extraction and cleaning (free tier)
-- **OpenAI SDK**: Unified interface for both APIs
+- **DeepSeek V3**: Primary translation engine (baseline, enhanced, final)
+- **Cerebras Qwen-3-32B**: Rule extraction and cleaning (free tier)
+- **OpenAI SDK**: Unified async interface for both APIs
 
 ### **RAG Infrastructure**
-- **FAISS**: Vector similarity search for terminology
-- **SentenceTransformers**: Multilingual embeddings for Chinese terms
-- **Pattern Matching**: Regex + ML for cultivation term categorization
+- **Simple Term Matching**: Direct Chinese → English term lookups
+- **Pattern Recognition**: Cultivation term categorization (realms, techniques, titles)
+- **Validation System**: Text verification to prevent AI hallucinations
 
 ### **Performance Metrics**
-- **Translation Quality**: 90%+ baseline scores, +31 point improvement with rules+RAG
-- **Cost Efficiency**: ~$0.02 per chapter with caching optimization
-- **Processing Speed**: 30+ chapters/hour with async parallel processing
+- **Processing Speed**: ~90s per chapter with Rules + RAG
+- **Terminology Accuracy**: 6-8 terms applied per chapter
+- **Concurrent Processing**: 3x speed improvement via async
+- **Quality Evaluation**: 5-category AI scoring system
 
 ## Results & Performance
 
 ### Translation Quality Improvements
-- **Terminology Consistency**: 100% accuracy for known terms via RAG
-- **Style Consistency**: 31 point average improvement via learned rules
-- **Pattern Learning**: Automatic handling of new cultivation terms
+- **Terminology Consistency**: Near complete accuracy for known terms via RAG
+- **Style Consistency**: Applied 10 learned rules per translation
+- **Pattern Learning**: Automatic categorization of cultivation terms
 
 ### System Performance
-- **Speed**: 30+ chapters/hour (async processing)
-- **Cost**: $0.02 per chapter (with DeepSeek caching)
-- **Accuracy**: 90% translation quality scores
-- **Scalability**: Handles unlimited terminology via RAG
+- **Speed**: ~90s per chapter (Rules + RAG), 30s baseline
+- **Accuracy**: RAG terms successfully applied in context
+- **Scalability**: Async processing handles 10+ chapters concurrently
+- **Cost**: ~$0.005 per chapter with DeepSeek API
 
 ### Example Results
 ```
-Original Chinese: 龙尘看着那个丹帝传承，心中涌起一股金丹期的力量
+Chinese: 龙尘看着那个丹帝传承，心中涌起一股聚气三重天的力量
 
 Baseline Translation:
-"Long Chen looked at the Alchemy Emperor's inheritance, feeling Golden Core stage power surge in his heart"
+"Long Chen looked at the Alchemy Emperor's inheritance, feeling Qi Gathering third level power surge in his heart"
 
-Enhanced (Rules + RAG):
-"Long Chen gazed at the Pill God's inheritance, feeling Golden Core stage power surge through him"
+Final (Rules + RAG):
+"Long Chen gazed at the Pill God's inheritance, feeling third Heavenstage of Qi Condensation power surge through him"
 
 Improvements:
 - "Alchemy Emperor" → "Pill God" (RAG terminology)
 - "looked at" → "gazed at" (style rules)  
-- "in his heart" → "through him" (natural flow)
+- "Qi Gathering third level" → "third Heavenstage of Qi Condensation" (RAG precision)
+- "in his heart" → "through him" (natural flow from rules)
 ```
 
 ## Development Roadmap
 
 ### Phase 1: Core System (Complete)
-- [x] Async translation pipeline with caching
-- [x] Rule extraction and application
+- [x] Async translation pipeline
+- [x] Rule extraction and application via AI comparison
 - [x] Quality evaluation system
-- [ ]  RAG terminology database
+- [x] RAG terminology database with validation
 
-### Phase 2: RAG Enhancement (In Progress)  
-- [ ] Vector database for term similarity
-- [ ]  Pattern learning for cultivation terms
-- [ ]  Context caching optimization
-- [ ] Expand to 1000+ term database
+### Phase 2: Enhancement & Optimization (Current)
+- [x] Terminology extraction pipeline
+- [x] AI-powered rule and terminology cleaning
+- [x] Complete evaluation pipeline (Baseline vs Final)
+- [ ] Context caching optimization for cost reduction
 
 ### Phase 3: Production Scaling (Next)
 - [ ] Multi-novel terminology sharing
 - [ ] Real-time translation API
 - [ ] Web interface for translation management
-- [ ] Advanced context understanding (plot awareness)
+- [ ] Expanded terminology database (1000+ terms)
 
 ### Phase 4: Multi-Domain Expansion (Future)
 - [ ] Support for other web novel genres  
@@ -271,16 +284,16 @@ Improvements:
 
 ## Cost Analysis
 
-**Per Chapter Costs** (with caching optimization):
-- **Input tokens (cache hit)**: ~4K × $0.014/1M = $0.000056
-- **Input tokens (cache miss)**: ~2K × $0.27/1M = $0.00054  
-- **Output tokens**: ~4K × $1.10/1M = $0.0044
-- **Total per chapter**: ~$0.005
+**Per Chapter Costs** (current API usage):
+- **Baseline Translation**: ~2K tokens × $0.27/1M = $0.0005
+- **Rules + RAG Translation**: ~4K tokens × $0.27/1M = $0.001
+- **Evaluation**: ~8K tokens × $0.27/1M = $0.002
+- **Total per chapter**: ~$0.004
 
 **At Scale:**
-- **1,000 chapters**: ~$5 total cost
-- **Time to process**: ~33 hours (30 chapters/hour)
-- **Quality**: Professional-grade consistency
+- **100 chapters**: ~$0.40 total cost
+- **Time to process**: ~2.5 hours (100 chapters concurrent)
+- **Quality**: High terminology consistency
 
 ## Quick Start
 
@@ -289,18 +302,18 @@ Improvements:
 echo "DEEPSEEK_API_KEY=your_key_here" > .env
 echo "CEREBRAS_API_KEY=your_key_here" >> .env
 
-# 2. Build RAG database
-python scripts/6_build_rag.py
-
-# 3. Run complete pipeline
+# 2. Run complete pipeline (chapters 1-3)
 python scripts/1_baseline_translate.py
 python scripts/2_extract_rules.py  
 python scripts/3_clean_rules.py
 python scripts/4_enhanced_translate.py
-python scripts/5_evaluate.py
+python scripts/5_extract_terminology.py
+python scripts/6_clean_terms.py
+python scripts/7_final_translate.py
+python scripts/8_evaluate.py
 
-# 4. Check results
-cat results/evaluation/reports/evaluation_report.txt
+# 3. Check results
+cat results/evaluation_complete/reports/simplified_evaluation_report.txt
 ```
 
 ## Why This Approach Works
@@ -308,19 +321,51 @@ cat results/evaluation/reports/evaluation_report.txt
 ### vs. Simple LLM Translation
 - **Consistency**: RAG ensures "丹帝" always becomes "Pill God"
 - **Quality**: Style rules maintain professional translation standards
-- **Context**: Understands cultivation novel conventions
+- **Learning**: System improves by learning from professional translations
 
 ### vs. Traditional CAT Tools  
-- **Intelligence**: Learns patterns, not just exact matches
+- **Intelligence**: Learns patterns via AI comparison, not just exact matches
 - **Adaptability**: Self-improves from ground truth examples
-- **Scale**: Handles novel-length content efficiently with caching
+- **Validation**: AI prevents hallucinations through text verification
 
 ### vs. Human Translation
-- **Speed**: 30+ chapters/hour vs 1-2 chapters/day
+- **Speed**: ~90s per chapter vs hours for human translation
 - **Availability**: 24/7 operation with consistent quality
 - **Consistency**: Never forgets established terminology or style rules
-- **Cost**: $0.005/chapter vs $50-200/chapter for human translation
-- **Quality**: Matches professional standards with learned rules + RAG
+- **Cost**: $0.004/chapter vs significantly more for human translation
+- **Learning**: Continuously improves from professional examples
+
+---
+
+## Legacy Setup (Local Infrastructure)
+
+**Original Plan**: Deploy locally with vLLM + CUDA 12.8 on WSL2  
+**Current Status**: Moved to API-based development due to driver compatibility issues
+
+<details>
+<summary>Click to view original local setup plans</summary>
+
+### Local Environment Setup (WSL2 + CUDA 12.8) - ON HOLD
+
+This project was originally designed for Windows 11 + WSL2 with local GPU acceleration via CUDA 12.8 and NVIDIA RTX 5090. Due to vLLM driver compatibility issues, moved to API-based development for faster iteration.
+
+#### System Requirements (Future)
+- Windows 11 with WSL2 enabled
+- NVIDIA GPU with latest WSL-compatible drivers  
+- Ubuntu 24.04 LTS installed via WSL
+- Python 3.12
+- CUDA Toolkit 12.8 (WSL version)
+
+#### Local Stack (Planned)
+- **LLM**: Qwen2.5-32B (local inference via vLLM)
+- **Vector Store**: FAISS for semantic pattern search
+- **Framework**: LangChain for RAG orchestration  
+- **Backend**: FastAPI for API services
+- **Frontend**: Next.js for translation interface
+
+*Note: Will return to local deployment once NVIDIA driver ecosystem stabilizes for WSL2 + vLLM compatibility.*
+
+</details>
 
 ---
 
