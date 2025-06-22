@@ -1,0 +1,13 @@
+# Core API dependencies
+openai>=1.0.0
+python-dotenv>=1.0.0
+cerebras-cloud-sdk>=1.0.0
+
+# Vector database and embeddings  
+chromadb>=1.0.0
+sentence-transformers>=2.2.0
+
+# Web scraping (for scrape/ scripts)
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+ebooklib>=0.18
