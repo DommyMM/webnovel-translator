@@ -36,7 +36,7 @@ class TerminologyConfig:
     start_chapter: int = 1
     end_chapter: int = 3
     model: str = "qwen-3-32b"  # Cerebras model
-    temperature: float = 0.1   # Low temp for consistent extraction
+    temperature: float = 0.2   # Low temp for consistent extraction
     max_concurrent: int = 3    # Conservative for Cerebras
 
 class SmartTerminologyExtractor:
@@ -92,30 +92,16 @@ class SmartTerminologyExtractor:
     def create_terminology_extraction_prompt(self, chinese_text: str, enhanced_text: str, ground_truth: str) -> str:
         """Create smart prompt for terminology extraction"""
         
-        prompt = f"""<think>
-I need to compare two English translations of a Chinese cultivation novel chapter and identify where they use different terminology for the same Chinese concepts. I should focus on terminology differences, not style or grammar differences.
-
-Key areas to look for:
-1. Character names - different romanizations or translations
-2. Cultivation terms - realms, techniques, concepts
-3. Titles and epithets - "Alchemy Emperor" vs "Pill God"
-4. Techniques and arts - martial arts, cultivation methods
-5. Places and organizations - sect names, location names
-6. Items and medicines - pill names, artifact names
-
-I should prefer the professional translation's terminology choices and identify where my translation differs.
-</think>
-
-You are an expert in Chinese cultivation novels. Compare these two English translations and extract terminology differences where they use different words for the same Chinese concepts.
+        prompt = f"""You are an expert in Chinese cultivation novels. Compare these two English translations and extract terminology differences where they use different words for the same Chinese concepts.
 
 CHINESE ORIGINAL (for context):
-{chinese_text[:1000]}...
+{chinese_text}
 
 MY TRANSLATION:
-{enhanced_text[:1000]}...
+{enhanced_text}
 
 PROFESSIONAL REFERENCE (prefer this terminology):
-{ground_truth[:1000]}...
+{ground_truth}
 
 Your task: Find terminology differences where MY TRANSLATION and PROFESSIONAL REFERENCE use different English words for the same Chinese concepts. Focus on names, cultivation terms, titles, techniques, and key concepts.
 
@@ -145,7 +131,8 @@ TERMINOLOGY_DIFFERENCES:
 **Examples of what I'm looking for:**
 ```
 丹帝 → Pill God (instead of Alchemy Emperor)
-龙尘 → Long Chen (instead of Dragon Dust)  
+龙尘 → Long Chen (instead of Dragon Dust)
+龙夫人 → Madam Long (instead of Dragon Lady)
 金丹期 → Golden Core stage (instead of Golden Core realm)
 ```
 
@@ -168,7 +155,7 @@ Extract the most important terminology differences:"""
                     {"role": "user", "content": prompt}
                 ],
                 temperature=self.config.temperature,
-                max_tokens=4096
+                max_tokens=16382
             )
             
             ai_response = response.choices[0].message.content
@@ -203,32 +190,46 @@ Extract the most important terminology differences:"""
     def parse_terminology_response(self, ai_response: str) -> List[Dict]:
         """Parse AI response into structured terminology entries"""
         
-        # Remove thinking tags
-        clean_response = re.sub(r'<think>.*?</think>', '', ai_response, flags=re.DOTALL).strip()
+        print(f"Chapter {self.chapter_num}: Raw response length: {len(ai_response)} chars")
         
         terminology_entries = []
         
         # Look for the terminology differences section
-        if "TERMINOLOGY_DIFFERENCES:" in clean_response:
-            terminology_section = clean_response.split("TERMINOLOGY_DIFFERENCES:")[1]
+        if "TERMINOLOGY_DIFFERENCES:" in ai_response:
+            terminology_section = ai_response.split("TERMINOLOGY_DIFFERENCES:")[1]
+            print(f"Chapter {self.chapter_num}: Found TERMINOLOGY_DIFFERENCES section")
         else:
-            # Fallback: look for lines with the pattern
-            terminology_section = clean_response
+            # Fallback: treat whole response as terminology section
+            terminology_section = ai_response
+            print(f"Chapter {self.chapter_num}: No section header found, using full response")
         
-        # Parse lines with the pattern: "Chinese → Professional (instead of My)"
+        # Parse lines with the pattern: "[Chinese] → [Professional] (instead of [My])"
         lines = terminology_section.split('\n')
         
         for line in lines:
             line = line.strip()
-            if not line or line.startswith('#') or line.startswith('```'):
+            if not line or line.startswith('#') or line.startswith('```') or line.startswith('-'):
                 continue
             
-            # Pattern: "丹帝 → Pill God (instead of Alchemy Emperor)"
-            match = re.match(r'^([^→]+)\s*→\s*([^(]+)\s*\(instead of ([^)]+)\)', line)
+            # Try bracketed format first: [Chinese] → [Professional] (instead of [My])
+            match = re.match(r'^\[([^\]]+)\]\s*→\s*\[([^\]]+)\]\s*\(instead of \[([^\]]+)\]\)', line)
+            
+            if not match:
+                # Try mixed format: [Chinese] → Professional (instead of My)
+                match = re.match(r'^\[([^\]]+)\]\s*→\s*([^(]+)\s*\(instead of ([^)]+)\)', line)
+            
+            if not match:
+                # Try no brackets: Chinese → Professional (instead of My)
+                match = re.match(r'^([^→]+)\s*→\s*([^(]+)\s*\(instead of ([^)]+)\)', line)
+            
             if match:
                 chinese_term = match.group(1).strip()
                 professional_term = match.group(2).strip()
                 my_term = match.group(3).strip()
+                
+                # Skip if any term is empty
+                if not chinese_term or not professional_term or not my_term:
+                    continue
                 
                 # Categorize the term
                 category = self.categorize_term(chinese_term, professional_term)
@@ -239,8 +240,8 @@ Extract the most important terminology differences:"""
                     "professional_term": professional_term,
                     "my_translation_term": my_term,
                     "category": category,
-                    "frequency": 1,  # Will be updated when merging across chapters
-                    "confidence": 0.8,  # High confidence from AI extraction
+                    "frequency": 1,
+                    "confidence": 0.8,
                     "context_example": line,
                     "chapters_seen": [self.chapter_num],
                     "created_at": datetime.now().isoformat()
@@ -248,7 +249,12 @@ Extract the most important terminology differences:"""
                 
                 terminology_entries.append(entry)
                 print(f"  Extracted: {chinese_term} → {professional_term} (instead of {my_term})")
+            else:
+                # Log failed parsing for debugging
+                if '→' in line and len(line) > 10:
+                    print(f"  Failed to parse: {line}")
         
+        print(f"Chapter {self.chapter_num}: Successfully parsed {len(terminology_entries)} entries")
         return terminology_entries
     
     def categorize_term(self, chinese_term: str, professional_term: str) -> str:
