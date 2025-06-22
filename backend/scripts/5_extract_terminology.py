@@ -93,6 +93,8 @@ class SmartTerminologyExtractor:
         """Create smart prompt for terminology extraction"""
         
         prompt = f"""You are an expert in Chinese cultivation novels. Compare these two English translations and extract terminology differences where they use different words for the same Chinese concepts.
+    
+IMPORTANT: Do not include any thinking process, reasoning, or analysis in your response. Give only the final output.
 
 CHINESE ORIGINAL (for context):
 {chinese_text}
@@ -126,9 +128,7 @@ TERMINOLOGY_DIFFERENCES:
 ...
 ```
 
-**Categories:** character, cultivation, title, technique, place, item
-
-**Examples of what I'm looking for:**
+**Examples:**
 ```
 丹帝 → Pill God (instead of Alchemy Emperor)
 龙尘 → Long Chen (instead of Dragon Dust)
@@ -151,7 +151,7 @@ Extract the most important terminology differences:"""
             response = self.client.chat.completions.create(
                 model=self.config.model,
                 messages=[
-                    {"role": "system", "content": "You are an expert in Chinese cultivation novels specializing in terminology consistency. Extract terminology differences between translations with high precision."},
+                    {"role": "system", "content": "You are a terminology extraction expert. Provide only the requested formatted output without showing your reasoning or thinking process."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=self.config.temperature,
