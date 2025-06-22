@@ -1,143 +1,123 @@
-# Backend Scripts
+# Backend Scripts Documentation
 
-Async translation pipeline with rule learning for Chinese cultivation novels.
+Technical reference for translation pipeline scripts.
 
-## Complete Workflow
+## Common Patterns
 
-### 1. Baseline Translation (Async)
+**Standard Args**: `[--start N] [--end N] [--chapter N] [--concurrent N]`  
+**Chapter Input**: `../data/chapters/clean/chapter_X.txt`  
+**Ground Truth**: `../data/chapters/ground_truth/chapter_X.txt`
+
+## Script Reference
+
+### 1. `1_baseline_translate.py`
 ```bash
 python 1_baseline_translate.py
 ```
-- **Parallel processing**: Translates chapters 1-3 concurrently using DeepSeek API
-- **Performance**: ~60s for however many parallel
-- **Output**: Raw translations without any learned rules applied
-- **Results**: `../results/baseline/translations/` + analytics
+**Function**: Baseline translation (DeepSeek API)  
+**Config**: Hardcoded in script (edit to change range/concurrency)  
+**Output**: `../results/baseline/translations/`
 
-**Arguments:**
+---
+
+### 2. `2_extract_rules.py`
 ```bash
-python 1_baseline_translate.py --start 1 --end 5 --concurrent 8
+python 2_extract_rules.py [standard args]
 ```
-- `--start N`: Start chapter number (default: 1)
-- `--end N`: End chapter number (default: 3)
-- `--concurrent N`: Max parallel requests (default: 10)
+**Function**: Extract translation rules via AI comparison  
+**Model**: DeepSeek V3 | **Processing**: Async  
+**Input**: Baseline translations + ground truth  
+**Output**: `../data/rules/extracted_raw.json`
 
-### 2. Extract Rules (Async)  
+---
+
+### 3. `3_clean_rules.py`
 ```bash
-python 2_extract_rules.py
-```
-- **Analysis**: Compares baseline translations with professional ground truth
-- **AI extraction**: Uses DeepSeek to identify improvement patterns
-- **Performance**: ~21s concurrent processing
-- **Output**: Raw rules database with 15+ extraction rules
-- **Results**: `../data/rules/extracted_raw.json`
-
-**Arguments:**
-```bash
-python 2_extract_rules.py --start 1 --end 5 --chapter 2
-```
-- `--start N`: Start chapter number (default: 1)
-- `--end N`: End chapter number (default: 3) 
-- `--chapter N`: Extract rules from single chapter only
-
-### 3. Clean Rules (Cerebras)
-```bash
-python 3_clean_rules.py  
-```
-- **AI cleaning**: Uses Cerebras qwen-3-32b to filter and refine rules
-- **Quality control**: Removes parsing artifacts and vague descriptions
-- **Output**: 10 high-quality, actionable translation rules
-- **Categories**: Terminology (2) + Style (3) + Structure (3) + Cultural (2)
-- **Results**: `../data/rules/cleaned.json` + readable `.txt`
-
-**No arguments** - uses fixed input/output paths and Cerebras qwen-3-32b model.
-
-### 4. Enhanced Translation (Async)
-```bash
-python 4_enhanced_translate.py
-```
-- **Rule application**: Re-translates chapters using the 10 learned rules
-- **Parallel processing**: Concurrent translation with rule guidance
-- **Quality improvement**: Applies specific terminology, style, and cultural rules
-- **Output**: Enhanced translations for comparison
-- **Results**: `../results/enhanced/translations/`
-
-**Arguments:**
-```bash
-python 4_enhanced_translate.py --start 1 --end 5 --chapter 2
-```
-- `--start N`: Start chapter number (default: 1)
-- `--end N`: End chapter number (default: 3)
-- `--chapter N`: Translate single chapter only
-
-### 5. Evaluation (Async)
-```bash
-python 5_evaluate.py
-```
-- **Comparison**: Evaluates baseline vs enhanced vs professional ground truth
-- **AI scoring**: Uses DeepSeek (low temp) for objective quality assessment
-- **Metrics**: Flow, character voice, clarity, genre feel, overall enjoyment
-- **Performance**: ~22s concurrent evaluation
-- **Results**: Detailed analytics + side-by-side comparisons
-
-**Arguments:**
-```bash
-python 5_evaluate.py --start 1 --end 5 --chapter 2
-```
-- `--start N`: Start chapter number (default: 1)
-- `--end N`: End chapter number (default: 3)
-- `--chapter N`: Evaluate single chapter only  
-
-## Key Features
-
-- **Async/Concurrent**: All scripts use parallel processing for 3-6x speed improvement
-- **Rule Learning**: Automatically extracts and applies translation improvement patterns
-- **Quality Control**: Multi-stage filtering (extraction → cleaning → application)
-- **Comprehensive Evaluation**: Objective AI scoring with detailed breakdowns
-
-## Data Flow
-```
-Chinese Chapters 
-    ↓ (Async DeepSeek)
-Baseline Translations 
-    ↓ (Compare with Ground Truth)
-Raw Rules Extraction 
-    ↓ (Cerebras Cleaning)
-Clean Rules 
-    ↓ (Apply During Translation)
-Enhanced Translations 
-    ↓ (AI Evaluation)
-Quality Improvement Metrics
-```
-
-## Common Usage Examples
-
-```bash
-# Standard workflow (chapters 1-3)
-python 1_baseline_translate.py
-python 2_extract_rules.py  
 python 3_clean_rules.py
-python 4_enhanced_translate.py
-python 5_evaluate.py
+```
+**Function**: Clean/filter extracted rules  
+**Model**: Cerebras Qwen-3-32B | **Processing**: Sequential  
+**Input**: `../data/rules/extracted_raw.json`  
+**Output**: `../data/rules/cleaned.json`
 
-# Process more chapters with higher concurrency
-python 1_baseline_translate.py --start 1 --end 10 --concurrent 8
-python 2_extract_rules.py --start 1 --end 10 --concurrent 5
-python 4_enhanced_translate.py --start 1 --end 10 --concurrent 8
-python 5_evaluate.py --start 1 --end 10 --concurrent 5
+---
 
-# Test single chapter
-python 4_enhanced_translate.py --chapter 5
-python 5_evaluate.py --chapter 5
+### 4. `4_enhanced_translate.py`
+```bash
+python 4_enhanced_translate.py [standard args]
+```
+**Function**: Translate with learned rules only  
+**Same as step 2**: Model, processing, chapter inputs  
+**Input**: + `../data/rules/cleaned.json`  
+**Output**: `../results/enhanced/translations/`
 
-# Higher quality rule extraction
-python 2_extract_rules.py --min-confidence 0.8 --concurrent 3
+---
+
+### 5. `5_extract_terminology.py`
+```bash
+python 5_extract_terminology.py [standard args]
+```
+**Function**: Extract terminology differences for RAG  
+**Model**: Cerebras Qwen-3-32B | **Processing**: Async  
+**Input**: Enhanced translations + ground truth  
+**Output**: `../data/terminology/extracted_terminology.json`
+
+---
+
+### 6. `6_clean_terms.py`
+```bash
+python 6_clean_terms.py
+```
+**Function**: Build ChromaDB vector database  
+**Same as step 3**: Sequential processing, no args  
+**Embeddings**: Qwen3-8B Chinese-specialized  
+**Input**: `../data/terminology/extracted_terminology.json`  
+**Output**: `../data/terminology/chroma_db_rag/`
+
+---
+
+### 7. `7_final_translate.py`
+```bash
+python 7_final_translate.py [standard args] [--test] [--no-qwen]
+```
+**Function**: Final translation with rules + RAG  
+**Same as step 2**: Model, processing, chapter inputs  
+**Input**: + Clean rules + ChromaDB  
+**Output**: `../results/final/translations/`  
+**Performance**: ~90s/chapter
+
+---
+
+### 8. `8_evaluate.py`
+```bash
+python 8_evaluate.py [standard args]
+```
+**Function**: Quality evaluation across all stages  
+**Same as step 2**: Model, processing  
+**Input**: Baseline + final + ground truth  
+**Output**: `../results/evaluation/`
+
+## Processing Summary
+
+| Script | Type | Args | Model |
+|--------|------|------|-------|
+| 1 | Async | Hardcoded | DeepSeek |
+| 2,4,7,8 | Async | Standard | DeepSeek |
+| 3,6 | Sequential | None | Cerebras |
+| 5 | Async | Standard | Cerebras |
+
+## Typical Usage
+
+**Full Pipeline**:
+```bash
+python 1_baseline_translate.py  # Edit config in script
+python 2_extract_rules.py --start 1 --end 3
+python 3_clean_rules.py
+python 4_enhanced_translate.py --start 1 --end 3
+python 5_extract_terminology.py --start 1 --end 3
+python 6_clean_terms.py
+python 7_final_translate.py --start 1 --end 3
+python 8_evaluate.py --start 1 --end 3
 ```
 
-## Current Rules Applied
-
-**Terminology (2 rules)**: Literal cultivation terms, preserve "Qi Condensation" over "Qi Gathering"
-**Style (3 rules)**: Neutral tone, punchy fight scenes, preserve conversational voice  
-**Structure (3 rules)**: Short paragraphs, preserve scene breaks, simple dialogue tags
-**Cultural (2 rules)**: Direct idiom translation, avoid Westernized phrases
-
-Results saved to `results/` with comprehensive analytics and human-readable comparisons.
+**Environment**: `DEEPSEEK_API_KEY`, `CEREBRAS_API_KEY`
