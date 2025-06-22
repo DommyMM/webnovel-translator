@@ -116,11 +116,10 @@ class AsyncCompleteEvaluator:
         prompt = f"""You are a Western reader who enjoys cultivation novels. Your job is to rate how much you'd enjoy reading this translation compared to the professional version.
 
 PROFESSIONAL REFERENCE (your 100% gold standard):
-{ground_truth[:800]}...
+{ground_truth}
 
 {translation_type.upper()} TRANSLATION (rate this version):
-{translation[:800]}...
-
+{translation}
 Your Task: Rate this translation as a Western reader who wants to enjoy the story.
 
 What You Care About (as a Western cultivation novel reader):
