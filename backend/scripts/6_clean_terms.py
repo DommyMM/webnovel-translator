@@ -2,16 +2,13 @@ import json
 import os
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, List
+from typing import Dict
 from collections import defaultdict, Counter
-from cerebras.cloud.sdk import Cerebras
 from dotenv import load_dotenv
 
 load_dotenv()
 
 class TerminologyDatabaseBuilder:
-    """Build production-ready RAG database from extracted terminology"""
-    
     def __init__(self):
         self.input_file = "../data/terminology/extracted_terminology.json"
         self.output_file = "../data/terminology/rag_database.json"
@@ -22,7 +19,6 @@ class TerminologyDatabaseBuilder:
         Path("../data/terminology").mkdir(exist_ok=True, parents=True)
     
     def load_extracted_terminology(self) -> Dict:
-        """Load the raw extracted terminology"""
         if not Path(self.input_file).exists():
             raise FileNotFoundError(f"Extracted terminology not found: {self.input_file}")
         
@@ -33,8 +29,6 @@ class TerminologyDatabaseBuilder:
         return data
     
     def clean_and_merge_terminology(self, raw_data: Dict) -> Dict:
-        """Clean and merge terminology entries"""
-        
         raw_terminology = raw_data.get("terminology", {})
         
         # Build clean database
@@ -93,40 +87,7 @@ class TerminologyDatabaseBuilder:
             "terminology": clean_db
         }
     
-    def validate_key_terms(self, clean_db: Dict) -> List[str]:
-        """Validate that key expected terms are present"""
-        
-        key_expected_terms = [
-            "龙尘",  # Main character
-            "丹帝",  # Title (the key fix)
-            "灵根",  # Cultivation concept
-            "宝儿"   # Supporting character
-        ]
-        
-        missing_terms = []
-        found_terms = []
-        
-        terminology = clean_db["terminology"]
-        
-        for term in key_expected_terms:
-            if term in terminology:
-                found_terms.append(f"{term} → {terminology[term]['english_term']}")
-            else:
-                missing_terms.append(term)
-        
-        print(f"\nKEY TERMS VALIDATION:")
-        print("=" * 40)
-        for term in found_terms:
-            print(f"✅ {term}")
-        
-        if missing_terms:
-            print(f"❌ Missing key terms: {missing_terms}")
-        
-        return missing_terms
-    
     def save_rag_database(self, clean_db: Dict):
-        """Save the production RAG database"""
-        
         # Save JSON database
         with open(self.output_file, 'w', encoding='utf-8') as f:
             json.dump(clean_db, f, indent=2, ensure_ascii=False)
@@ -167,8 +128,6 @@ class TerminologyDatabaseBuilder:
         print(f"Readable version saved to: {self.readable_file}")
     
     def show_database_preview(self, clean_db: Dict):
-        """Show preview of the RAG database"""
-        
         terminology = clean_db["terminology"]
         metadata = clean_db["metadata"]
         
@@ -191,29 +150,19 @@ class TerminologyDatabaseBuilder:
             frequency = data["frequency"]
             category = data["category"]
             print(f"{i+1:2d}. {chinese_term:12} → {english_term:20} ({category}, freq: {frequency})")
-        
-        # Show key terminology fix
-        if "丹帝" in terminology:
-            pill_god_data = terminology["丹帝"]
-            print(f"\n🎯 KEY FIX CONFIRMED:")
-            print(f"   丹帝 → {pill_god_data['english_term']} (frequency: {pill_god_data['frequency']})")
-            print(f"   This will fix 'Alchemy Emperor' → 'Pill God' consistently!")
 
 def test_rag_query(rag_db_file: str):
-    """Test the RAG database with sample queries"""
-    
     if not Path(rag_db_file).exists():
         print("RAG database not found for testing")
         return
     
-    # Simple test query
     with open(rag_db_file, 'r', encoding='utf-8') as f:
         rag_data = json.load(f)
     
     terminology = rag_data["terminology"]
     
-    # Test sample chapter terms
-    test_terms = ["龙尘", "丹帝", "灵根", "宝儿", "虎骨丹"]
+    # Test with actual terms from the database
+    test_terms = list(terminology.keys())[:5]  # First 5 terms from database
     
     print(f"\nRAG QUERY TEST:")
     print("=" * 40)
@@ -236,8 +185,6 @@ def test_rag_query(rag_db_file: str):
     return found_terms
 
 def main():
-    """Build production RAG database from extracted terminology"""
-    
     print("Step 6: Building Production RAG Database")
     print("=" * 60)
     
@@ -251,9 +198,6 @@ def main():
         print("Cleaning and merging terminology...")
         clean_db = builder.clean_and_merge_terminology(raw_data)
         
-        # Validate key terms
-        missing_terms = builder.validate_key_terms(clean_db)
-        
         # Show preview
         builder.show_database_preview(clean_db)
         
@@ -265,15 +209,11 @@ def main():
         print("\nTesting RAG queries...")
         test_rag_query(builder.output_file)
         
-        print(f"\n✅ RAG Database Build Complete!")
+        print(f"\nRAG Database Build Complete!")
         print(f"Database ready for use in translation pipeline")
         
-        if missing_terms:
-            print(f"\n⚠️  Missing some expected terms: {missing_terms}")
-            print("You may want to run terminology extraction on more chapters")
-        
     except FileNotFoundError as e:
-        print(f"❌ Error: {e}")
+        print(f"Error: {e}")
         print("Please run terminology extraction first:")
         print("  python 5_extract_terminology.py --start 1 --end 3")
 

@@ -6,7 +6,7 @@ import argparse
 import asyncio
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List
 from dataclasses import dataclass, asdict
 from openai import AsyncOpenAI
 from dotenv import load_dotenv

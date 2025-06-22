@@ -20,18 +20,13 @@ class CompleteEvaluationMetrics:
     enhanced_score: float
     final_score: float
     professional_score: float = 100.0
-    
-    # Improvements
     rules_improvement: float = 0.0  # enhanced - baseline
     rag_improvement: float = 0.0    # final - enhanced
     total_improvement: float = 0.0  # final - baseline
-    
-    # Detailed breakdowns for final translation
     flow_score: float = 0.0
     character_voice_score: float = 0.0
     clarity_score: float = 0.0
     genre_score: float = 0.0
-    
     evaluator_comments: str = ""
     evaluation_time: float = 0.0
     timestamp: str = ""
@@ -52,8 +47,6 @@ class CompleteEvaluationConfig:
     max_concurrent: int = 10
 
 class AsyncCompleteEvaluator:
-    """Evaluate all three translation versions for a single chapter"""
-    
     def __init__(self, config: CompleteEvaluationConfig, chapter_num: int):
         self.config = config
         self.chapter_num = chapter_num
@@ -118,7 +111,7 @@ class AsyncCompleteEvaluator:
         return baseline_text, enhanced_text, final_text, ground_truth
     
     def create_evaluation_prompt(self, translation: str, ground_truth: str, translation_type: str) -> str:
-        """Create evaluation prompt for AI scoring"""
+        """Create evaluation prompt for scoring translation quality"""
         
         prompt = f"""You are a Western reader who enjoys cultivation novels. Your job is to rate how much you'd enjoy reading this translation compared to the professional version.
 
@@ -128,16 +121,16 @@ PROFESSIONAL REFERENCE (your 100% gold standard):
 {translation_type.upper()} TRANSLATION (rate this version):
 {translation[:800]}...
 
-**Your Task**: Rate this translation as a Western reader who wants to enjoy the story.
+Your Task: Rate this translation as a Western reader who wants to enjoy the story.
 
-**What You Care About** (as a Western cultivation novel reader):
-- **Natural English Flow**: Does it read smoothly like a real English novel?
-- **Character Personality**: Do characters feel real and consistent?  
-- **Story Enjoyment**: Can you follow the action and get invested?
-- **Proper Cultivation Terms**: Do terms like "Spiritual Strength" feel right?
-- **Western Style**: Written for Western readers colloquially, not literal translation
+What You Care About (as a Western cultivation novel reader):
+- Natural English Flow: Does it read smoothly like a real English novel?
+- Character Personality: Do characters feel real and consistent?  
+- Story Enjoyment: Can you follow the action and get invested?
+- Proper Cultivation Terms: Do terms like "Spiritual Strength" feel right?
+- Western Style: Written for Western readers colloquially, not literal translation
 
-**Scoring Scale**:
+Scoring Scale:
 - 95-100%: Perfect - reads like a professional English novel
 - 85-95%: Excellent - reads like professional English, would prefer this over many fan translations
 - 70-84%: Very good - smooth reading with minor artifacts, fully enjoyable
@@ -147,14 +140,14 @@ PROFESSIONAL REFERENCE (your 100% gold standard):
 - 10-24%: Very poor - broken English, major comprehension issues
 - 0-9%: Unreadable - incomprehensible, completely failed translation
 
-**Rate these aspects**:
-1. **Overall Enjoyment**: How much would you enjoy this vs professional?
-2. **Reading Flow**: Does it read smoothly?
-3. **Character Voice**: Do characters feel real and consistent?
-4. **Story Clarity**: Can you follow what's happening?
-5. **Genre Feel**: Does it feel like a proper cultivation novel?
+Rate these aspects:
+1. Overall Enjoyment: How much would you enjoy this vs professional?
+2. Reading Flow: Does it read smoothly?
+3. Character Voice: Do characters feel real and consistent?
+4. Story Clarity: Can you follow what's happening?
+5. Genre Feel: Does it feel like a proper cultivation novel?
 
-**Response Format**:
+Response Format:
 OVERALL: [score]%
 FLOW: [score]%
 CHARACTER: [score]%  
@@ -165,7 +158,7 @@ COMMENTS: [2-3 sentences about what works well or needs improvement for reader e
         return prompt
     
     async def evaluate_translation_async(self, translation: str, ground_truth: str, translation_type: str) -> Dict:
-        """Get AI evaluation scores for a translation asynchronously"""
+        """Evaluate a single translation against ground truth"""
         
         start_time = time.time()
         prompt = self.create_evaluation_prompt(translation, ground_truth, translation_type)
@@ -205,7 +198,7 @@ COMMENTS: [2-3 sentences about what works well or needs improvement for reader e
             }
     
     def parse_evaluation_response(self, response_text: str) -> Dict:
-        """Parse the AI evaluation response into structured scores"""
+        """Parse evaluation response to extract scores"""
         
         scores = {
             "overall_score": 0,
@@ -218,8 +211,8 @@ COMMENTS: [2-3 sentences about what works well or needs improvement for reader e
         
         # Extract scores using regex
         patterns = {
-            "overall_score": r"\*{0,2}OVERALL\*{0,2}:\s*(\d+)%",
-            "flow_score": r"\*{0,2}FLOW\*{0,2}:\s*(\d+)%",
+            "overall_score": r"OVERALL:\s*(\d+)%",
+            "flow_score": r"FLOW:\s*(\d+)%",
             "character_score": r"CHARACTER:\s*(\d+)%",
             "clarity_score": r"CLARITY:\s*(\d+)%",
             "genre_score": r"GENRE:\s*(\d+)%"
@@ -238,7 +231,8 @@ COMMENTS: [2-3 sentences about what works well or needs improvement for reader e
         return scores
     
     async def evaluate_chapter_complete_async(self, semaphore: asyncio.Semaphore) -> Optional[CompleteEvaluationMetrics]:
-        """Evaluate all three translations for a chapter"""
+        """Evaluate all three translation versions for a chapter"""
+        
         async with semaphore:
             print(f"Starting Chapter {self.chapter_num} complete evaluation...")
             
@@ -298,9 +292,9 @@ COMMENTS: [2-3 sentences about what works well or needs improvement for reader e
                 return None
     
     def save_complete_evaluation(self, baseline_eval: Dict, enhanced_eval: Dict, final_eval: Dict,
-                               metrics: CompleteEvaluationMetrics, baseline_text: str, enhanced_text: str,
-                               final_text: str, ground_truth: str):
-        """Save detailed evaluation results for a chapter"""
+                                metrics: CompleteEvaluationMetrics, baseline_text: str, enhanced_text: str,
+                                final_text: str, ground_truth: str):
+        """Save detailed evaluation results"""
         
         # Save scoring results
         scores_file = Path(self.config.evaluation_output_dir, "scores", f"chapter_{self.chapter_num:04d}_complete_scores.json")
@@ -352,8 +346,6 @@ COMMENTS: [2-3 sentences about what works well or needs improvement for reader e
             f.write(f"Final Comments: {final_eval['comments']}\n")
 
 class AsyncCompleteEvaluationPipeline:
-    """Run complete evaluation across multiple chapters"""
-    
     def __init__(self, config: CompleteEvaluationConfig):
         self.config = config
         self.setup_directories()
@@ -364,7 +356,7 @@ class AsyncCompleteEvaluationPipeline:
             Path(self.config.evaluation_output_dir, subdir).mkdir(exist_ok=True)
     
     async def run_async_complete_evaluation(self):
-        """Main evaluation pipeline"""
+        """Run complete evaluation pipeline on all chapters"""
         
         print("Starting Complete Translation Evaluation Pipeline")
         print(f"Evaluator Model: {self.config.evaluator_model}")
@@ -406,7 +398,9 @@ class AsyncCompleteEvaluationPipeline:
         evaluation_time = time.time() - start_time
         print(f"Complete evaluation finished in {evaluation_time:.1f}s")
         print(f"Successfully evaluated {len(successful_metrics)}/{len(chapters)} chapters")
-        print(f"Failed chapters: {failed_count}")
+        
+        if failed_count > 0:
+            print(f"Failed chapters: {failed_count}")
         
         # Save analytics and generate report
         print("Generating final evaluation report...")
@@ -421,29 +415,30 @@ class AsyncCompleteEvaluationPipeline:
             avg_rag_improvement = sum(m.rag_improvement for m in successful_metrics) / len(successful_metrics)
             avg_total_improvement = sum(m.total_improvement for m in successful_metrics) / len(successful_metrics)
             
-            print(f"\n🎯 COMPLETE PIPELINE RESULTS:")
+            print(f"\nCOMPLETE PIPELINE RESULTS:")
             print("=" * 60)
             print(f"Average Baseline Score: {avg_baseline:.1f}%")
             print(f"Average Enhanced Score: {avg_enhanced:.1f}% ({avg_rules_improvement:+.1f} from rules)")
             print(f"Average Final Score: {avg_final:.1f}% ({avg_rag_improvement:+.1f} from RAG)")
             print(f"Total Average Improvement: {avg_total_improvement:+.1f} points")
             
-            print(f"\n📊 IMPACT BREAKDOWN:")
+            print(f"\nIMPACT BREAKDOWN:")
             print(f"  Rules Impact: {avg_rules_improvement:+.1f} points")
             print(f"  RAG Impact: {avg_rag_improvement:+.1f} points")
             print(f"  Combined Impact: {avg_total_improvement:+.1f} points")
             
+            # Simple assessment without emojis
             if avg_total_improvement > 5:
-                print(f"\n✅ EXCELLENT: Pipeline shows significant improvement!")
+                print(f"\nRESULT: Pipeline shows significant improvement")
             elif avg_total_improvement > 2:
-                print(f"\n✅ GOOD: Pipeline shows meaningful improvement")
+                print(f"\nRESULT: Pipeline shows meaningful improvement")
             else:
-                print(f"\n⚠️ LIMITED: Pipeline improvement is minimal")
+                print(f"\nRESULT: Pipeline improvement is limited")
         
         return successful_metrics
     
     def save_complete_evaluation_report(self, metrics: List[CompleteEvaluationMetrics]):
-        """Save comprehensive evaluation report"""
+        """Save comprehensive evaluation analytics and report"""
         
         if not metrics:
             print("No evaluation metrics to save")
@@ -549,9 +544,8 @@ class AsyncCompleteEvaluationPipeline:
         print(f"Complete evaluation analytics saved to: {analytics_file}")
         print(f"Human-readable report saved to: {report_file}")
     
-    def generate_pipeline_conclusion(self, total_improvements: List[float], 
-                                   rules_improvements: List[float], rag_improvements: List[float]) -> str:
-        """Generate conclusion about overall pipeline effectiveness"""
+    def generate_pipeline_conclusion(self, total_improvements: List[float], rules_improvements: List[float], rag_improvements: List[float]) -> str:
+        """Generate objective conclusion about pipeline effectiveness"""
         
         avg_total = sum(total_improvements) / len(total_improvements)
         avg_rules = sum(rules_improvements) / len(rules_improvements)
@@ -576,7 +570,8 @@ class AsyncCompleteEvaluationPipeline:
             return f"The translation pipeline shows limited effectiveness with {avg_total:.1f} average change. Rules ({avg_rules:+.1f}) and RAG ({avg_rag:+.1f}) impacts vary. Only {positive_total}/{total_count} chapters improved. Consider reviewing rule extraction and terminology quality."
 
 def main():
-    """Main execution function for complete evaluation pipeline"""
+    """Main evaluation pipeline entry point"""
+    
     parser = argparse.ArgumentParser(description="Complete Translation Evaluation Pipeline")
     parser.add_argument("--chapter", type=int, help="Evaluate single chapter")
     parser.add_argument("--start", type=int, default=1, help="Start chapter")
@@ -617,7 +612,7 @@ def main():
         print("  1. python 1_baseline_translate.py")
         print("  2-3. python 2_extract_rules.py && python 3_clean_rules.py")
         print("  4. python 4_enhanced_translate.py")
-        print("  5-6. python 5_extract_terminology.py && python 6_clean_terminology.py")
+        print("  5-6. python 5_extract_terminology.py && python 6_clean_terms.py")
         print("  7. python 7_final_translate.py")
         return
     

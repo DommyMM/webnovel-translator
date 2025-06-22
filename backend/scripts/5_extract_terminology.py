@@ -40,8 +40,6 @@ class TerminologyConfig:
     max_concurrent: int = 3    # Conservative for Cerebras
 
 class SmartTerminologyExtractor:
-    """Extract terminology differences using AI comparison"""
-    
     def __init__(self, config: TerminologyConfig, chapter_num: int):
         self.config = config
         self.chapter_num = chapter_num
@@ -53,8 +51,6 @@ class SmartTerminologyExtractor:
         Path(self.config.raw_responses_dir).mkdir(exist_ok=True, parents=True)
     
     def load_translations(self) -> tuple[str, str, str]:
-        """Load Chinese original, enhanced translation, and ground truth"""
-        
         # Load Chinese original (for context)
         chinese_file = Path(self.config.chinese_chapters_dir) / f"chapter_{self.chapter_num:04d}_cn.txt"
         if not chinese_file.exists():
@@ -90,8 +86,6 @@ class SmartTerminologyExtractor:
         return chinese_text, enhanced_text, ground_truth
     
     def create_terminology_extraction_prompt(self, chinese_text: str, enhanced_text: str, ground_truth: str) -> str:
-        """Create smart prompt for terminology extraction"""
-        
         prompt = f"""You are an expert in Chinese cultivation novels. Compare these two English translations and extract terminology differences where they use different words for the same Chinese concepts.
     
 IMPORTANT: Do not include any thinking process, reasoning, or analysis in your response. Give only the final output.
@@ -141,8 +135,6 @@ Extract the most important terminology differences:"""
         return prompt
     
     async def extract_terminology_async(self, chinese_text: str, enhanced_text: str, ground_truth: str) -> List[Dict]:
-        """Extract terminology using Cerebras AI"""
-        
         prompt = self.create_terminology_extraction_prompt(chinese_text, enhanced_text, ground_truth)
         
         try:
@@ -188,8 +180,6 @@ Extract the most important terminology differences:"""
             return []
     
     def parse_terminology_response(self, ai_response: str) -> List[Dict]:
-        """Parse AI response into structured terminology entries"""
-        
         print(f"Chapter {self.chapter_num}: Raw response length: {len(ai_response)} chars")
         
         terminology_entries = []
@@ -258,8 +248,6 @@ Extract the most important terminology differences:"""
         return terminology_entries
     
     def categorize_term(self, chinese_term: str, professional_term: str) -> str:
-        """Categorize the terminology type"""
-        
         # Character names (usually 2-3 chars, proper names)
         if (len(chinese_term) <= 3 and 
             re.match(r'^[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?$', professional_term)):
@@ -293,7 +281,6 @@ Extract the most important terminology differences:"""
         return "general"
     
     async def extract_terminology_for_chapter(self, semaphore: asyncio.Semaphore) -> Optional[List[Dict]]:
-        """Extract terminology for this specific chapter"""
         async with semaphore:
             print(f"Starting Chapter {self.chapter_num} terminology extraction...")
             
@@ -326,8 +313,6 @@ Extract the most important terminology differences:"""
                 return None
 
 class SmartTerminologyPipeline:
-    """Run smart terminology extraction across multiple chapters"""
-    
     def __init__(self, config: TerminologyConfig):
         self.config = config
         self.setup_directories()
@@ -337,7 +322,6 @@ class SmartTerminologyPipeline:
         Path(self.config.raw_responses_dir).mkdir(exist_ok=True, parents=True)
     
     async def run_async_terminology_extraction(self):
-        """Main pipeline to extract terminology differences asynchronously"""
         print("Starting Smart Terminology Extraction Pipeline")
         print(f"Model: {self.config.model}")
         print(f"Processing chapters {self.config.start_chapter}-{self.config.end_chapter}")
@@ -390,8 +374,6 @@ class SmartTerminologyPipeline:
         return all_terminology
     
     def merge_and_save_terminology(self, all_terminology: List[Dict]):
-        """Merge terminology from all chapters and save database"""
-        
         # Merge identical terms across chapters
         merged_terms = {}
         

@@ -48,15 +48,12 @@ class FinalTranslationConfig:
     max_concurrent: int = 10
 
 class SimpleRAGQuerySystem:
-    """Simple RAG query system for production use"""
-    
     def __init__(self, rag_database_file: str):
         self.rag_database_file = rag_database_file
         self.terminology_db = None
         self.load_database()
     
     def load_database(self):
-        """Load the RAG terminology database"""
         if not Path(self.rag_database_file).exists():
             print(f"Warning: RAG database not found: {self.rag_database_file}")
             self.terminology_db = {}
@@ -69,7 +66,6 @@ class SimpleRAGQuerySystem:
         print(f"Loaded RAG database with {len(self.terminology_db)} terms")
     
     def extract_chinese_terms(self, chinese_text: str) -> List[str]:
-        """Extract Chinese terms from text for querying"""
         terms = set()
         
         # Extract Chinese character sequences (2-6 characters)
@@ -87,7 +83,6 @@ class SimpleRAGQuerySystem:
         return sorted(list(set(filtered_terms)))
     
     def query_terminology(self, chinese_terms: List[str]) -> Dict[str, str]:
-        """Query terminology for given Chinese terms"""
         if not self.terminology_db:
             return {}
         
@@ -99,14 +94,11 @@ class SimpleRAGQuerySystem:
         return results
     
     def query_chapter(self, chinese_text: str) -> Dict[str, str]:
-        """Query terminology for a chapter's Chinese text"""
         chinese_terms = self.extract_chinese_terms(chinese_text)
         terminology = self.query_terminology(chinese_terms)
         return terminology
 
 class AsyncFinalTranslator:
-    """Final translator with Rules + RAG terminology"""
-    
     def __init__(self, config: FinalTranslationConfig, chapter_num: int, rules: List[Dict], rag_system: SimpleRAGQuerySystem):
         self.config = config
         self.chapter_num = chapter_num
@@ -140,8 +132,6 @@ class AsyncFinalTranslator:
         return chinese_text, ground_truth
     
     def create_final_translation_prompt(self, chinese_text: str, terminology: Dict[str, str]) -> str:
-        """Create translation prompt with both rules and RAG terminology"""
-        
         # Build rules section
         rules_section = ""
         if self.rules:
@@ -234,7 +224,6 @@ Please provide a high-quality English translation following the rules and termin
         return min(similarity * 1.5, 1.0)
     
     def load_previous_similarities(self) -> tuple[float, float]:
-        """Load baseline and enhanced similarities for comparison"""
         baseline_similarity = 0.0
         enhanced_similarity = 0.0
         
@@ -261,8 +250,8 @@ Please provide a high-quality English translation following the rules and termin
         return baseline_similarity, enhanced_similarity
     
     def save_chapter_results(self, chinese_text: str, translation: str, ground_truth: str, 
-                           performance_stats: Dict, baseline_similarity: float, enhanced_similarity: float,
-                           terminology_applied: Dict[str, str]) -> tuple[float, float, float]:
+                            performance_stats: Dict, baseline_similarity: float, enhanced_similarity: float,
+                            terminology_applied: Dict[str, str]) -> tuple[float, float, float]:
         # Save final translation
         translation_file = Path(self.config.output_dir, "translations", f"chapter_{self.chapter_num:04d}_final.txt")
         with open(translation_file, 'w', encoding='utf-8') as f:
@@ -308,7 +297,6 @@ Please provide a high-quality English translation following the rules and termin
         return final_similarity, improvement_over_baseline, improvement_over_enhanced
     
     async def process_chapter_async(self, semaphore: asyncio.Semaphore) -> Optional[FinalTranslationMetrics]:
-        """Process a single chapter asynchronously with full Rules + RAG"""
         async with semaphore:
             print(f"Starting Chapter {self.chapter_num} final translation (Rules + RAG)...")
             
@@ -374,9 +362,7 @@ Please provide a high-quality English translation following the rules and termin
             
             return metrics
 
-class AsyncFinalTranslationPipeline:
-    """Run final translation with Rules + RAG in parallel"""
-    
+class AsyncFinalTranslationPipeline:    
     def __init__(self, config: FinalTranslationConfig):
         self.config = config
         self.rules = self.load_translation_rules()
@@ -389,7 +375,6 @@ class AsyncFinalTranslationPipeline:
             Path(self.config.output_dir, subdir).mkdir(exist_ok=True)
     
     def load_translation_rules(self) -> List[Dict]:
-        """Load cleaned rules"""
         rules_file = Path(self.config.rules_file)
         if not rules_file.exists():
             print(f"Warning: Rules file not found: {rules_file}")
@@ -403,12 +388,10 @@ class AsyncFinalTranslationPipeline:
         return rules
     
     def setup_rag_system(self) -> SimpleRAGQuerySystem:
-        """Initialize RAG system"""
         rag = SimpleRAGQuerySystem(self.config.rag_database_file)
         return rag
     
     async def run_async_final_translation(self):
-        """Main pipeline to run final translation with Rules + RAG"""
         print("Starting Final Translation Pipeline with Rules + RAG")
         print(f"Model: {self.config.model}")
         print(f"Temperature: {self.config.temperature}")
@@ -425,7 +408,7 @@ class AsyncFinalTranslationPipeline:
         
         # Create translators for each chapter
         translators = [AsyncFinalTranslator(self.config, chapter_num, self.rules, self.rag) 
-                      for chapter_num in chapters]
+                        for chapter_num in chapters]
         
         # Create tasks for all chapters
         tasks = [translator.process_chapter_async(semaphore) for translator in translators]
@@ -485,7 +468,6 @@ class AsyncFinalTranslationPipeline:
         return successful_metrics
     
     def save_final_analytics(self, metrics: List[FinalTranslationMetrics]):
-        """Save final analytics"""
         analytics_file = Path(self.config.output_dir, "analytics", "final_analytics.json")
         
         if not metrics:
