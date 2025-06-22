@@ -22,6 +22,20 @@ class Qwen3EmbeddingFunction(EmbeddingFunction):
         embeddings = self.model.encode(texts, convert_to_numpy=True)
         return embeddings.tolist()
 
+def chunk_chinese_text_by_lines(text):
+    """Split Chinese text by newlines - clean semantic chunks"""
+    lines = text.split('\n')
+    
+    # Clean up lines
+    cleaned_lines = []
+    for line in lines:
+        line = line.strip()
+        # Skip empty lines, chapter headers, and very short lines
+        if len(line) >= 5 and not line.startswith('第') and not line.startswith('﻿'):
+            cleaned_lines.append(line)
+    
+    return cleaned_lines
+
 class RAGDebugger:
     def __init__(self, use_qwen3=True):
         self.use_qwen3 = use_qwen3
@@ -30,7 +44,7 @@ class RAGDebugger:
         self.chapter_file = "../data/chapters/chinese/chapter_0001_cn.txt"
         
         print("=" * 60)
-        print("RAG DEBUG TOOL")
+        print("RAG DEBUG TOOL - LINE-BY-LINE CHUNKING")
         print("=" * 60)
         
         self.load_database()
@@ -113,46 +127,109 @@ class RAGDebugger:
         except Exception as e:
             print(f"   ERROR: Could not retrieve database contents: {e}")
     
-    def test_similarity_thresholds(self):
-        print(f"\n4. TESTING SIMILARITY THRESHOLDS")
+    def test_line_by_line_chunking(self):
+        print(f"\n4. TESTING LINE-BY-LINE CHUNKING")
         print("-" * 40)
         
         if not hasattr(self, 'chapter_text'):
             print("   ERROR: No chapter text loaded")
             return
         
-        # Test different thresholds
-        thresholds = [0.1, 0.2, 0.3, 0.4, 0.5]
+        # Chunk chapter into lines
+        lines = chunk_chinese_text_by_lines(self.chapter_text)
+        print(f"Chapter split into {len(lines)} lines")
         
-        for threshold in thresholds:
-            print(f"\n   Threshold {threshold}:")
+        print(f"\nFirst 5 lines:")
+        for i, line in enumerate(lines[:5]):
+            print(f"   {i+1}. {line}")
+        
+        # Test each line for terminology matches
+        print(f"\nTesting each line for terminology matches:")
+        print("-" * 40)
+        
+        all_terminology = {}
+        
+        for i, line in enumerate(lines[:15]):  # Test first 15 lines
+            print(f"\nLine {i+1}: {line[:50]}..." if len(line) > 50 else f"\nLine {i+1}: {line}")
+            
             try:
                 results = self.collection.query(
-                    query_texts=[self.chapter_text],
-                    n_results=10,
+                    query_texts=[line],
+                    n_results=5,
                     include=['documents', 'metadatas', 'distances']
                 )
                 
-                matches = 0
+                found_terms = []
                 for doc, metadata, distance in zip(
                     results['documents'][0], 
                     results['metadatas'][0], 
                     results['distances'][0]
                 ):
                     similarity = 1.0 - distance
-                    if similarity >= threshold:
-                        matches += 1
-                        if matches <= 3:  # Show first 3 matches
-                            english = metadata.get('english_term', 'N/A')
-                            print(f"     {doc} → {english} (sim: {similarity:.3f})")
+                    if similarity >= 0.3:  # Test with 0.3 threshold
+                        english = metadata.get('english_term', 'N/A')
+                        found_terms.append((doc, english, similarity))
+                        all_terminology[doc] = english
                 
-                print(f"     Total matches: {matches}")
-                
+                if found_terms:
+                    print(f"  Found {len(found_terms)} terms:")
+                    for chinese, english, sim in found_terms:
+                        print(f"    {chinese} → {english} (sim: {sim:.3f})")
+                else:
+                    print(f"  No terms found above 0.3 threshold")
+                    
             except Exception as e:
-                print(f"     ERROR: {e}")
+                print(f"  Error: {e}")
+        
+        print(f"\n" + "=" * 50)
+        print(f"SUMMARY: Found {len(all_terminology)} unique terms total:")
+        for chinese, english in all_terminology.items():
+            print(f"  {chinese} → {english}")
+        
+        return all_terminology
+    
+    def test_similarity_thresholds_chunked(self):
+        print(f"\n5. TESTING SIMILARITY THRESHOLDS (CHUNKED)")
+        print("-" * 40)
+        
+        if not hasattr(self, 'chapter_text'):
+            print("   ERROR: No chapter text loaded")
+            return
+        
+        # Chunk chapter into lines
+        lines = chunk_chinese_text_by_lines(self.chapter_text)
+        
+        # Test different thresholds on chunked data
+        thresholds = [0.1, 0.2, 0.3, 0.4, 0.5]
+        
+        for threshold in thresholds:
+            print(f"\n   Threshold {threshold} (line-by-line):")
+            total_matches = 0
+            
+            for line in lines[:10]:  # Test first 10 lines
+                try:
+                    results = self.collection.query(
+                        query_texts=[line],
+                        n_results=5,
+                        include=['documents', 'metadatas', 'distances']
+                    )
+                    
+                    for doc, metadata, distance in zip(
+                        results['documents'][0], 
+                        results['metadatas'][0], 
+                        results['distances'][0]
+                    ):
+                        similarity = 1.0 - distance
+                        if similarity >= threshold:
+                            total_matches += 1
+                            
+                except Exception as e:
+                    continue
+            
+            print(f"     Total matches across all lines: {total_matches}")
     
     def test_specific_terms(self):
-        print(f"\n5. TESTING SPECIFIC TERMS")
+        print(f"\n6. TESTING SPECIFIC TERMS")
         print("-" * 40)
         
         # Test specific Chinese terms that should be in your chapter
@@ -198,15 +275,25 @@ class RAGDebugger:
     def run_full_debug(self):
         if hasattr(self, 'collection') and hasattr(self, 'chapter_text'):
             self.show_database_contents()
-            self.test_similarity_thresholds()
+            terminology = self.test_line_by_line_chunking()
+            self.test_similarity_thresholds_chunked()
             self.test_specific_terms()
+            
+            print(f"\n" + "=" * 60)
+            print(f"FINAL RECOMMENDATION:")
+            if terminology:
+                print(f"✅ Line-by-line chunking works! Found {len(terminology)} terms")
+                print(f"✅ Recommended threshold: 0.3")
+                print(f"✅ Use this approach in Step 7")
+            else:
+                print(f"❌ No matches found - need to debug further")
         else:
             print("ERROR: Database or chapter not loaded properly")
 
 def main():
     import argparse
     
-    parser = argparse.ArgumentParser(description="Debug RAG System")
+    parser = argparse.ArgumentParser(description="Debug RAG System with Chunking")
     parser.add_argument("--no-qwen", action="store_true", help="Use basic embeddings")
     
     args = parser.parse_args()
