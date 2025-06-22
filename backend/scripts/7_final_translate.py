@@ -138,10 +138,9 @@ class ChromaRAGQuerySystem:
         return self.query_terminology(chinese_text)
 
 class AsyncFinalTranslator:
-    def __init__(self, chapter_num: int, rules: List[str], use_qwen3: bool = True):
+    def __init__(self, chapter_num: int, rules: List[str], shared_rag=None):
         self.chapter_num = chapter_num
         self.rules = rules
-        self.use_qwen3 = use_qwen3
         
         # File paths
         self.chinese_file = f"../data/chapters/chinese/chapter_{chapter_num:04d}_cn.txt"
@@ -151,8 +150,8 @@ class AsyncFinalTranslator:
         # Setup output directory
         Path("../results/final/translations").mkdir(exist_ok=True, parents=True)
         
-        # Initialize RAG system
-        self.rag = ChromaRAGQuerySystem(use_qwen3=use_qwen3)
+        # Use shared RAG instance
+        self.rag = shared_rag
         
         # Initialize OpenAI client
         self.client = AsyncOpenAI(
@@ -267,12 +266,16 @@ async def translate_chapters_with_rag(start_chapter: int, end_chapter: int, max_
     with open(rules_file, 'r', encoding='utf-8') as f:
         rules_data = json.load(f)
     
-    # Extract descriptions from the correct JSON structure
+    # Extract rules
     rules = []
     for rule_obj in rules_data.get("rules", []):
         rules.append(rule_obj["description"])
     
     print(f"Loaded {len(rules)} style rules from step 3")
+    
+    # Create shared RAG system
+    print("Initializing shared RAG system...")
+    shared_rag = ChromaRAGQuerySystem(use_qwen3=use_qwen3)
     
     # Create semaphore for concurrency control
     semaphore = asyncio.Semaphore(max_concurrent)
@@ -280,7 +283,7 @@ async def translate_chapters_with_rag(start_chapter: int, end_chapter: int, max_
     # Create translators for each chapter
     translators = []
     for chapter_num in range(start_chapter, end_chapter + 1):
-        translator = AsyncFinalTranslator(chapter_num, rules, use_qwen3=use_qwen3)
+        translator = AsyncFinalTranslator(chapter_num, rules, shared_rag=shared_rag)
         translators.append(translator)
     
     # Process chapters concurrently
