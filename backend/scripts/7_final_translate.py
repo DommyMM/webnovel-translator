@@ -323,7 +323,7 @@ class AsyncFinalTranslator:
         # Build style rules text
         rules_text = "\n".join([f"- {rule}" for rule in self.rules])
         
-        # Build terminology examples (not exact mappings!)
+        # Build terminology examples (not exact mappings)
         terminology_examples = ""
         if terminology:
             terminology_examples = "\nRELEVANT PROFESSIONAL TRANSLATION EXAMPLES:\n"

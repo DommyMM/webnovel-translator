@@ -16,6 +16,45 @@ def chunk_chinese_text_by_lines(text):
             cleaned_lines.append(line)
     return cleaned_lines
 
+def chunk_chinese_text_by_lines_and_sentences(text):
+    """Split text by lines first, then by punctuation for better semantic chunking"""
+    lines = text.split('\n')
+    all_chunks = []
+    
+    # Chinese and English punctuation that marks sentence boundaries
+    sentence_endings = ['？', '。', '！', '；', '?', '.', '!', ';']
+    
+    for line in lines:
+        line = line.strip()
+        if len(line) < 5 or line.startswith('第') or line.startswith('﻿'):
+            continue
+            
+        # Split line by sentence-ending punctuation
+        current_sentence = ""
+        for char in line:
+            current_sentence += char
+            
+            # If we hit sentence-ending punctuation, finalize the sentence
+            if char in sentence_endings:
+                # Clean the sentence
+                sentence = current_sentence.strip()
+                # Remove quotes and extra punctuation from ends
+                sentence = sentence.strip('"').strip('"').strip('——').strip()
+                
+                if len(sentence) >= 5:  # Only keep substantial sentences
+                    all_chunks.append(sentence)
+                
+                current_sentence = ""
+        
+        # Add any remaining text as a sentence
+        if current_sentence.strip():
+            sentence = current_sentence.strip()
+            sentence = sentence.strip('"').strip('"').strip('——').strip()
+            if len(sentence) >= 5:
+                all_chunks.append(sentence)
+    
+    return all_chunks
+
 class BGEEmbeddingFunction(EmbeddingFunction):
     def __init__(self, model_name="BAAI/bge-m3"):
         import torch
@@ -241,7 +280,7 @@ class RAGRetrievalTester:
             
             results = self.collection.query(
                 query_texts=[line],
-                n_results=5,
+                n_results=10,
                 include=['documents', 'metadatas', 'distances']
             )
             
@@ -255,7 +294,7 @@ class RAGRetrievalTester:
                 english_term = metadata['english_term']
                 similarity = 1.0 - distance
                 
-                if similarity >= 0.2:  # Apply threshold
+                if similarity >= 0.1:  # Apply threshold
                     line_terms.append((chinese_term, english_term, similarity))
                     if chinese_term not in total_found:
                         total_found[chinese_term] = (english_term, similarity)
@@ -272,6 +311,137 @@ class RAGRetrievalTester:
         print(f"\nTotal unique terms found:")
         for chinese_term, (english_term, similarity) in sorted(total_found.items()):
             print(f"  {chinese_term} → {english_term} ({similarity:.3f})")
+    
+    def test_line_by_line_chapter1(self):
+        """Test line-by-line + sentence retrieval on Chapter 1"""
+        
+        print(f"\nLine-by-line + sentence Chapter 1 test ({self.model_name})")
+        print("=" * 60)
+        
+        # Load Chapter 1
+        chapter_file = "../data/chapters/clean/chapter_0001_cn.txt"
+        if not Path(chapter_file).exists():
+            print(f"Chapter file not found: {chapter_file}")
+            return
+        
+        with open(chapter_file, 'r', encoding='utf-8') as f:
+            chinese_text = f.read().strip()
+        
+        # Test both old and new chunking
+        old_lines = chunk_chinese_text_by_lines(chinese_text)
+        new_chunks = chunk_chinese_text_by_lines_and_sentences(chinese_text)
+        
+        print(f"Old chunking: {len(old_lines)} lines")
+        print(f"New chunking: {len(new_chunks)} semantic chunks")
+        
+        print(f"\nFirst 5 old vs new chunks:")
+        for i in range(min(5, len(old_lines), len(new_chunks))):
+            print(f"\nOld Line {i+1}: {old_lines[i][:80]}...")
+            if i < len(new_chunks):
+                print(f"New Chunk {i+1}: {new_chunks[i][:80]}...")
+        
+        # Test the new chunking approach
+        total_found = {}
+        
+        for i, chunk in enumerate(new_chunks[:15], 1):  # Test first 15 chunks
+            print(f"\nChunk {i}: {chunk}")
+            
+            results = self.collection.query(
+                query_texts=[chunk],
+                n_results=10,
+                include=['documents', 'metadatas', 'distances']
+            )
+            
+            chunk_terms = []
+            for doc, metadata, distance in zip(
+                results['documents'][0], 
+                results['metadatas'][0], 
+                results['distances'][0]
+            ):
+                chinese_term = doc
+                english_term = metadata['english_term']
+                similarity = 1.0 - distance
+                
+                if similarity >= 0.1:  # Apply threshold
+                    chunk_terms.append((chinese_term, english_term, similarity))
+                    if chinese_term not in total_found:
+                        total_found[chinese_term] = (english_term, similarity)
+                    elif similarity > total_found[chinese_term][1]:
+                        total_found[chinese_term] = (english_term, similarity)
+            
+            if chunk_terms:
+                print(f"  Found {len(chunk_terms)} terms:")
+                for chinese_term, english_term, similarity in chunk_terms:
+                    print(f"    {chinese_term} → {english_term} ({similarity:.3f})")
+            else:
+                print(f"  No terms found above threshold")
+        
+        print(f"\nTotal unique terms found with new chunking:")
+        for chinese_term, (english_term, similarity) in sorted(total_found.items()):
+            print(f"  {chinese_term} → {english_term} ({similarity:.3f})")
+    
+    def test_sentence_splitting_demo(self):
+        """Demonstrate how sentence splitting affects the problematic line"""
+        
+        print(f"\nSentence splitting demonstration ({self.model_name})")
+        print("=" * 60)
+        
+        # The problematic line 2
+        problematic_line = '"我是傲视天下，睥睨九霄的绝世丹帝——龙尘？我是人见人欺，无法修行的窝囊废——龙尘？"'
+        
+        print(f"Original line: {problematic_line}")
+        print(f"Length: {len(problematic_line)} chars")
+        
+        # Test original line
+        print(f"\n--- Testing ORIGINAL line ---")
+        results = self.collection.query(
+            query_texts=[problematic_line],
+            n_results=10,
+            include=['documents', 'metadatas', 'distances']
+        )
+        
+        for doc, metadata, distance in zip(
+            results['documents'][0], 
+            results['metadatas'][0], 
+            results['distances'][0]
+        ):
+            chinese_term = doc
+            english_term = metadata['english_term']
+            similarity = 1.0 - distance
+            threshold_status = "✅" if similarity >= 0.1 else "❌"
+            print(f"  {chinese_term} → {english_term} (sim: {similarity:.3f}) {threshold_status}")
+        
+        # Split into sentences
+        sentences = []
+        current_sentence = ""
+        for char in problematic_line:
+            current_sentence += char
+            if char in ['？', '?']:
+                sentence = current_sentence.strip().strip('"').strip('"')
+                if len(sentence) >= 5:
+                    sentences.append(sentence)
+                current_sentence = ""
+        
+        print(f"\n--- Split into {len(sentences)} sentences ---")
+        for i, sentence in enumerate(sentences, 1):
+            print(f"\nSentence {i}: {sentence}")
+            
+            results = self.collection.query(
+                query_texts=[sentence],
+                n_results=5,
+                include=['documents', 'metadatas', 'distances']
+            )
+            
+            for doc, metadata, distance in zip(
+                results['documents'][0], 
+                results['metadatas'][0], 
+                results['distances'][0]
+            ):
+                chinese_term = doc
+                english_term = metadata['english_term']
+                similarity = 1.0 - distance
+                threshold_status = "✅" if similarity >= 0.1 else "❌"
+                print(f"    {chinese_term} → {english_term} (sim: {similarity:.3f}) {threshold_status}")
 
 def main():
     import argparse
@@ -279,7 +449,7 @@ def main():
     parser = argparse.ArgumentParser(description="Test ChromaDB RAG Retrieval")
     parser.add_argument("--bge", action="store_true", help="Use BGE-M3 embeddings")
     parser.add_argument("--no-qwen", action="store_true", help="Use basic embeddings instead of Qwen3")
-    parser.add_argument("--test", choices=["specific", "threshold", "database", "chapter"], 
+    parser.add_argument("--test", choices=["specific", "threshold", "database", "chapter", "sentence"], 
                         default="all", help="Which test to run")
     
     args = parser.parse_args()
@@ -294,6 +464,10 @@ def main():
             tester = RAGRetrievalTester(use_qwen3=False, use_bge=True)
         else:
             tester = RAGRetrievalTester(use_qwen3=not args.no_qwen, use_bge=False)
+        
+        if args.test == "sentence":
+            tester.test_sentence_splitting_demo()
+            return
         
         if args.test == "specific" or args.test == "all":
             tester.test_specific_queries()
