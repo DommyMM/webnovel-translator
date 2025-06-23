@@ -9,6 +9,30 @@ from chromadb.utils import embedding_functions
 from chromadb.utils.embedding_functions import EmbeddingFunction
 from sentence_transformers import SentenceTransformer
 
+class BGEEmbeddingFunction(EmbeddingFunction):
+    def __init__(self, model_name="BAAI/bge-m3"):
+        print(f"Loading embedding model: {model_name}")
+        
+        # GPU optimizations
+        import torch
+        if torch.cuda.is_available():
+            gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1e9
+            gpu_name = torch.cuda.get_device_name(0)
+            print(f"GPU detected: {gpu_name} ({gpu_memory:.1f}GB)")
+            device = "cuda"
+        else:
+            device = "cpu"
+            print("No GPU detected, using CPU")
+        
+        self.model = SentenceTransformer(model_name, device=device)
+        
+        print(f"Model loaded on {device}")
+        print(f"Embedding dimension: {self.model.get_sentence_embedding_dimension()}")
+    
+    def __call__(self, texts: List[str]) -> List[List[float]]:
+        embeddings = self.model.encode(texts, convert_to_numpy=True)
+        return embeddings.tolist()
+
 class Qwen3EmbeddingFunction(EmbeddingFunction):
     def __init__(self, model_name="Qwen/Qwen3-Embedding-8B"):
         print(f"Loading embedding model: {model_name}")
@@ -39,17 +63,27 @@ class Qwen3EmbeddingFunction(EmbeddingFunction):
         return embeddings.tolist()
 
 class ChromaTerminologyBuilder:
-    def __init__(self, use_qwen3=True, qwen_model="Qwen/Qwen3-Embedding-8B"):
+    def __init__(self, use_qwen3=False, use_bge=True, qwen_model="Qwen/Qwen3-Embedding-8B"):
         self.input_file = "../data/terminology/extracted_terminology.json"
         self.use_qwen3 = use_qwen3
+        self.use_bge = use_bge
         self.qwen_model = qwen_model
         
-        if use_qwen3:
+        if use_bge:
+            self.db_path = "../data/terminology/chroma_db_bge"
+            self.readable_file = "../data/terminology/bge_terminology_readable.txt"
+            self.embedding_model_name = "BAAI/bge-m3"
+            self.collection_name = "bge_terminology"
+        elif use_qwen3:
             self.db_path = "../data/terminology/chroma_db_rag"
             self.readable_file = "../data/terminology/rag_terminology_readable.txt"
+            self.embedding_model_name = qwen_model
+            self.collection_name = "rag_terminology"
         else:
             self.db_path = "../data/terminology/chroma_db"
             self.readable_file = "../data/terminology/chroma_terminology_readable.txt"
+            self.embedding_model_name = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+            self.collection_name = "basic_terminology"
             
         self.setup_directories()
         self.setup_chromadb()
@@ -59,7 +93,9 @@ class ChromaTerminologyBuilder:
         Path(self.db_path).mkdir(exist_ok=True, parents=True)
     
     def setup_chromadb(self):
-        if self.use_qwen3:
+        if self.use_bge:
+            print("Setting up ChromaDB with BGE-M3 embeddings...")
+        elif self.use_qwen3:
             print("Setting up ChromaDB with Qwen3 embeddings...")
         else:
             print("Setting up ChromaDB with sentence-transformers...")
@@ -68,44 +104,46 @@ class ChromaTerminologyBuilder:
         self.client = chromadb.PersistentClient(path=self.db_path)
         
         # Choose embedding function
-        if self.use_qwen3:
+        if self.use_bge:
+            try:
+                self.embedding_function = BGEEmbeddingFunction("BAAI/bge-m3")
+            except Exception as e:
+                print(f"Failed to load BGE model: {e}")
+                raise
+        elif self.use_qwen3:
             try:
                 self.embedding_function = Qwen3EmbeddingFunction(
                     model_name=self.qwen_model
                 )
-                collection_name = "rag_terminology"
-                embedding_model_name = self.qwen_model
             except Exception as e:
                 print(f"Failed to load Qwen3 model: {e}")
                 print("Falling back to sentence-transformers")
                 self.use_qwen3 = False
                 self.embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
-                    model_name="paraphrase-multilingual-MiniLM-L12-v2"
+                    model_name="sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
                 )
-                collection_name = "basic_terminology"
-                embedding_model_name = "paraphrase-multilingual-MiniLM-L12-v2"
+                self.embedding_model_name = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+                self.collection_name = "basic_terminology"
         else:
             self.embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
-                model_name="paraphrase-multilingual-MiniLM-L12-v2"
+                model_name="sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
             )
-            collection_name = "basic_terminology"
-            embedding_model_name = "paraphrase-multilingual-MiniLM-L12-v2"
         
         # Get or create collection
         self.collection = self.client.get_or_create_collection(
-            name=collection_name,
+            name=self.collection_name,
             embedding_function=self.embedding_function,
             metadata={
                 "description": "Chinese cultivation novel terminology mappings",
                 "created_at": datetime.now().isoformat(),
                 "language_pair": "Chinese-English",
-                "embedding_model": embedding_model_name
+                "embedding_model": self.embedding_model_name
             }
         )
         
         print(f"ChromaDB collection ready: {self.collection.name}")
         print(f"Database path: {self.db_path}")
-        print(f"Embedding model: {embedding_model_name}")
+        print(f"Embedding model: {self.embedding_model_name}")
     
     def load_extracted_terminology(self) -> Dict:
         if not Path(self.input_file).exists():
@@ -162,7 +200,7 @@ class ChromaTerminologyBuilder:
             "avg_frequency": sum(frequency_stats) / len(frequency_stats) if frequency_stats else 0,
             "max_frequency": max(frequency_stats) if frequency_stats else 0,
             "chapters_covered": raw_data["metadata"].get("chapters_processed", "unknown"),
-            "embedding_model": self.qwen_model if self.use_qwen3 else "paraphrase-multilingual-MiniLM-L12-v2"
+            "embedding_model": self.embedding_model_name
         }
         
         return {
@@ -288,16 +326,36 @@ class ChromaTerminologyBuilder:
         print("Database test complete")
 
 def main():
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Build ChromaDB Vector Terminology Database")
+    parser.add_argument("--bge", action="store_true", help="Use BGE-M3 embeddings (default)")
+    parser.add_argument("--qwen", action="store_true", help="Use Qwen3-8B embeddings instead of BGE-M3")
+    parser.add_argument("--lite", action="store_true", help="Use basic MPNet embeddings")
+    
+    args = parser.parse_args()
+    
     print("Step 6: Building ChromaDB Vector Terminology Database")
     print("=" * 60)
     
-    # Configuration
-    use_qwen3 = True
-    qwen_model = "Qwen/Qwen3-Embedding-8B"
+    # Configuration based on arguments
+    if args.qwen:
+        use_qwen3 = True
+        use_bge = False
+        print("Using Qwen3-8B embeddings")
+    elif args.lite:
+        use_qwen3 = False
+        use_bge = False
+        print("Using basic sentence-transformers embeddings")
+    else:
+        use_qwen3 = False
+        use_bge = True
+        print("Using BGE-M3 embeddings (default)")
     
     builder = ChromaTerminologyBuilder(
         use_qwen3=use_qwen3,
-        qwen_model=qwen_model
+        use_bge=use_bge,
+        qwen_model="Qwen/Qwen3-Embedding-8B"
     )
     
     try:
@@ -323,9 +381,7 @@ def main():
         print("\nChromaDB Vector Database Build Complete")
         print("Vector database ready for step 7 (final translation)")
         print(f"Database location: {builder.db_path}")
-        
-        if use_qwen3:
-            print("Using Qwen3-8B embeddings for Chinese language processing")
+        print(f"Embedding model: {builder.embedding_model_name}")
         
     except FileNotFoundError as e:
         print(f"Error: {e}")

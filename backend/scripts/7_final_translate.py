@@ -39,12 +39,26 @@ class Qwen3EmbeddingFunction(EmbeddingFunction):
         embeddings = self.model.encode(texts, convert_to_numpy=True)
         return embeddings.tolist()
 
+class BGEEmbeddingFunction(EmbeddingFunction):
+    def __init__(self, model_name="BAAI/bge-m3"):
+        import torch
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.model = SentenceTransformer(model_name, device=device)
+    
+    def __call__(self, texts: List[str]) -> List[List[float]]:
+        embeddings = self.model.encode(texts, convert_to_numpy=True)
+        return embeddings.tolist()
+
 class ChromaRAGQuerySystem:
-    def __init__(self, use_qwen3=True, qwen_model="Qwen/Qwen3-Embedding-8B"):
+    def __init__(self, use_qwen3=False, use_bge=True, qwen_model="Qwen/Qwen3-Embedding-8B"):
         self.use_qwen3 = use_qwen3
+        self.use_bge = use_bge
         self.qwen_model = qwen_model
         
-        if use_qwen3:
+        if use_bge:
+            self.db_path = "../data/terminology/chroma_db_bge"
+            self.collection_name = "bge_terminology"
+        elif use_qwen3:
             self.db_path = "../data/terminology/chroma_db_rag"
             self.collection_name = "rag_terminology"
         else:
@@ -63,7 +77,18 @@ class ChromaRAGQuerySystem:
         self.client = chromadb.PersistentClient(path=self.db_path)
         
         # Setup embedding function
-        if self.use_qwen3:
+        if self.use_bge:
+            try:
+                self.embedding_function = BGEEmbeddingFunction("BAAI/bge-m3")
+                print(f"Using BGE-M3 embeddings")
+            except Exception as e:
+                print(f"Failed to load BGE model: {e}")
+                print("Falling back to sentence-transformers")
+                self.use_bge = False
+                self.embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
+                    model_name="sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+                )
+        elif self.use_qwen3:
             try:
                 self.embedding_function = Qwen3EmbeddingFunction(
                     model_name=self.qwen_model
@@ -74,11 +99,11 @@ class ChromaRAGQuerySystem:
                 print("Falling back to sentence-transformers")
                 self.use_qwen3 = False
                 self.embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
-                    model_name="paraphrase-multilingual-MiniLM-L12-v2"
+                    model_name="sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
                 )
         else:
             self.embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
-                model_name="paraphrase-multilingual-MiniLM-L12-v2"
+                model_name="sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
             )
         
         # Get collection
@@ -274,7 +299,6 @@ class AsyncFinalTranslator:
         )
     
     def load_chapter_files(self) -> Tuple[str, str]:
-        """Load Chinese text and ground truth files"""
         if not Path(self.chinese_file).exists():
             raise FileNotFoundError(f"Chinese file not found: {self.chinese_file}")
         
@@ -334,7 +358,6 @@ Translate naturally, using the professional examples as guidance for terminology
             return f"Translation failed: {e}"
     
     async def process_chapter_async(self, semaphore):
-        """Process a single chapter with parallel RAG and rules"""
         async with semaphore:
             print(f"Starting Chapter {self.chapter_num} final translation (Rules + Parallel ChromaRAG)")
             
@@ -360,7 +383,7 @@ Translate naturally, using the professional examples as guidance for terminology
                 chinese_text, 
                 10,  # max_results
                 0.2, # similarity_threshold  
-                8    # max_workers for your 7800X3D
+                8    # max_workers
             )
             
             rag_elapsed = time.time() - rag_start
@@ -393,7 +416,7 @@ Translate naturally, using the professional examples as guidance for terminology
                 "rag_time": rag_elapsed
             }
 
-async def translate_chapters_with_rag(start_chapter: int, end_chapter: int, max_concurrent: int = 3, use_qwen3: bool = True):
+async def translate_chapters_with_rag(start_chapter: int, end_chapter: int, max_concurrent: int = 3, use_qwen3: bool = False, use_bge: bool = True):
     # Load style rules from step 3
     rules_file = "../data/rules/cleaned.json"
     if not Path(rules_file).exists():
@@ -410,8 +433,8 @@ async def translate_chapters_with_rag(start_chapter: int, end_chapter: int, max_
     print(f"Loaded {len(rules)} style rules from step 3")
     
     # Create shared RAG system
-    print("Initializing shared RAG system...")
-    shared_rag = ChromaRAGQuerySystem(use_qwen3=use_qwen3)
+    print("Initializing shared RAG system")
+    shared_rag = ChromaRAGQuerySystem(use_qwen3=use_qwen3, use_bge=use_bge)
     
     # Create semaphore for concurrency control
     semaphore = asyncio.Semaphore(max_concurrent)
@@ -448,12 +471,11 @@ async def translate_chapters_with_rag(start_chapter: int, end_chapter: int, max_
     print(f"Output directory: ../results/final/translations/")
 
 def test_chroma_rag_system():
-    """Test the ChromaDB RAG system"""
     print("Testing ChromaDB RAG System")
     print("=" * 50)
     
     try:
-        rag = ChromaRAGQuerySystem(use_qwen3=True)
+        rag = ChromaRAGQuerySystem(use_qwen3=False, use_bge=True)
         
         # Test queries
         test_texts = [
@@ -482,7 +504,8 @@ def main():
     parser.add_argument("--end", type=int, default=3, help="End chapter number")
     parser.add_argument("--concurrent", type=int, default=3, help="Max concurrent requests")
     parser.add_argument("--test", action="store_true", help="Test RAG system only")
-    parser.add_argument("--no-qwen", action="store_true", help="Use basic embeddings instead of Qwen3")
+    parser.add_argument("--qwen", action="store_true", help="Use Qwen3-8B embeddings instead of BGE-M3")
+    parser.add_argument("--lite", action="store_true", help="Use basic embeddings instead of BGE-M3")
     
     args = parser.parse_args()
     
@@ -498,8 +521,17 @@ def main():
         print("Error: DEEPSEEK_API_KEY not found in environment")
         return
     
-    use_qwen3 = not args.no_qwen
-    model_type = "Qwen3" if use_qwen3 else "basic sentence-transformers"
+    if args.qwen:
+        use_qwen3 = True
+        use_bge = False
+    elif args.lite:
+        use_qwen3 = False
+        use_bge = False
+    else:
+        use_qwen3 = False
+        use_bge = True
+
+    model_type = "BGE-M3" if use_bge else ("Qwen3" if use_qwen3 else "basic sentence-transformers")
     print(f"Using {model_type} embeddings for RAG")
     
     # Run translation
@@ -508,7 +540,8 @@ def main():
             start_chapter=args.start,
             end_chapter=args.end,
             max_concurrent=args.concurrent,
-            use_qwen3=use_qwen3
+            use_qwen3=use_qwen3,
+            use_bge=use_bge
         ))
     except KeyboardInterrupt:
         print("\nTranslation interrupted by user")
