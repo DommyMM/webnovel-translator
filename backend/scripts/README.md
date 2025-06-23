@@ -4,9 +4,9 @@ Technical reference for translation pipeline scripts.
 
 ## Common Patterns
 
-**Standard Args**: `[--start N] [--end N] [--chapter N] [--concurrent N]`  
-**Chapter Input**: `../data/chapters/clean/chapter_X.txt`  
-**Ground Truth**: `../data/chapters/ground_truth/chapter_X.txt`
+**Standard Args**: `[--start N] [--end N] [--concurrent N]`  
+**Chapter Input**: `../data/chapters/clean/chapter_XXXX_cn.txt`  
+**Ground Truth**: `../data/chapters/ground_truth/chapter_XXXX_en.txt`
 
 ## Script Reference
 
@@ -66,25 +66,28 @@ python 5_extract_terminology.py [standard args]
 
 ### 6. `6_clean_terms.py`
 ```bash
-python 6_clean_terms.py
+python 6_clean_terms.py [--qwen] [--lite]
 ```
 **Function**: Build ChromaDB vector database  
-**Same as step 3**: Sequential processing, no args  
-**Embeddings**: Qwen3-8B Chinese-specialized  
+**Embeddings**: BGE-M3 (default) | Qwen3-8B | MPNet  
+**Processing**: Sequential, no chapter args  
 **Input**: `../data/terminology/extracted_terminology.json`  
-**Output**: `../data/terminology/chroma_db_rag/`
+**Output**: `../data/terminology/chroma_db_bge/` (or `chroma_db_rag/`, `chroma_db/`)
 
 ---
 
 ### 7. `7_final_translate.py`
 ```bash
-python 7_final_translate.py [standard args] [--test] [--no-qwen]
+python 7_final_translate.py [standard args] [--test] [--qwen] [--lite] [--debug] [--dry-run]
 ```
 **Function**: Final translation with rules + RAG  
-**Same as step 2**: Model, processing, chapter inputs  
+**Model**: DeepSeek V3 | **Processing**: Async  
+**Embeddings**: BGE-M3 (default) | Qwen3-8B | MPNet  
+**Chunking**: Semantic units (lines → sentences)  
+**Threshold**: 0.15 similarity for term retrieval  
 **Input**: + Clean rules + ChromaDB  
 **Output**: `../results/final/translations/`  
-**Performance**: ~90s/chapter
+**Debug**: `../debug/prompts/` (with --debug or --dry-run)
 
 ---
 
@@ -97,14 +100,31 @@ python 8_evaluate.py [standard args]
 **Input**: Baseline + final + ground truth  
 **Output**: `../results/evaluation/`
 
+## Embedding Models
+
+| Flag | Model | Use Case |
+|------|-------|----------|
+| Default | BGE-M3 | Best retrieval quality |
+| --qwen | Qwen3-8B | Chinese-specialized |
+| --lite | MPNet | Fast/basic embeddings |
+
+## Special Flags
+
+**Step 7 Only**:
+- `--test`: Test RAG system without translation
+- `--debug`: Save full prompts to debug folder
+- `--dry-run`: Build prompts without API calls
+
 ## Processing Summary
 
-| Script | Type | Args | Model |
-|--------|------|------|-------|
-| 1 | Async | Hardcoded | DeepSeek |
-| 2,4,7,8 | Async | Standard | DeepSeek |
-| 3,6 | Sequential | None | Cerebras |
-| 5 | Async | Standard | Cerebras |
+| Script | Type | Args | Model | Embeddings |
+|--------|------|------|-------|------------|
+| 1 | Async | Hardcoded | DeepSeek | - |
+| 2,4,8 | Async | Standard | DeepSeek | - |
+| 3 | Sequential | None | Cerebras | - |
+| 5 | Async | Standard | Cerebras | - |
+| 6 | Sequential | Embedding flags | - | BGE-M3/Qwen3/MPNet |
+| 7 | Async | Standard + special | DeepSeek | BGE-M3/Qwen3/MPNet |
 
 ## Typical Usage
 
@@ -115,9 +135,21 @@ python 2_extract_rules.py --start 1 --end 3
 python 3_clean_rules.py
 python 4_enhanced_translate.py --start 1 --end 3
 python 5_extract_terminology.py --start 1 --end 3
-python 6_clean_terms.py
-python 7_final_translate.py --start 1 --end 3
+python 6_clean_terms.py  # Uses BGE-M3 by default
+python 7_final_translate.py --start 1 --end 3  # Uses BGE-M3 by default
 python 8_evaluate.py --start 1 --end 3
+```
+
+**Development/Testing**:
+```bash
+# Test RAG retrieval
+python 7_final_translate.py --test
+
+# Debug prompts without API calls
+python 7_final_translate.py --start 1 --end 1 --dry-run --debug
+
+# Live translation with prompt saving
+python 7_final_translate.py --start 1 --end 1 --debug
 ```
 
 **Environment**: `DEEPSEEK_API_KEY`, `CEREBRAS_API_KEY`
