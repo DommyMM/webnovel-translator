@@ -3,6 +3,7 @@ import time
 import json
 import re
 import asyncio
+import random
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -22,6 +23,7 @@ class ChapterMetrics:
     tokens_per_second: float
     basic_similarity: float
     processing_time: float
+    retry_count: int
     timestamp: str
 
 @dataclass
@@ -36,6 +38,8 @@ class PipelineConfig:
     max_tokens: int = 8192
     base_url: str = "https://api.deepseek.com"
     max_concurrent: int = 10
+    max_retries: int = 3
+    base_retry_delay: float = 2.0
 
 class ParallelDeepSeekPipeline:    
     def __init__(self, config: PipelineConfig):
@@ -93,46 +97,88 @@ Please provide a high-quality English translation:"""
         
         return prompt.format(chinese_text=chinese_text)
     
-    async def translate_chapter_async(self, chinese_text: str) -> tuple[str, Dict]:
-        start_time = time.time()
+    async def translate_chapter_async(self, chinese_text: str, chapter_num: int) -> tuple[str, Dict]:
+        """Translate chapter with exponential backoff retry mechanism"""
         prompt = self.create_translation_prompt(chinese_text)
+        retry_count = 0
         
-        try:
-            response = await self.client.chat.completions.create(
-                model=self.config.model,
-                messages=[
-                    {"role": "system", "content": "You are an expert translator specializing in Chinese cultivation novels."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=self.config.temperature,
-                max_tokens=self.config.max_tokens
-            )
+        for attempt in range(self.config.max_retries + 1):
+            start_time = time.time()
             
-            translation = response.choices[0].message.content
-            
-            # Clean up reasoning tags or code blocks that might appear
-            translation = re.sub(r'<think>.*?</think>', '', translation, flags=re.DOTALL).strip()
-            translation = re.sub(r'^```.*?```$', '', translation, flags=re.DOTALL | re.MULTILINE).strip()
-            
-            translation_time = time.time() - start_time
-            total_tokens = response.usage.total_tokens
-            tokens_per_second = total_tokens / translation_time if translation_time > 0 else 0
-            
-            performance_stats = {
-                "translation_time": translation_time,
-                "total_tokens": total_tokens,
-                "tokens_per_second": tokens_per_second,
-                "prompt_tokens": response.usage.prompt_tokens,
-                "completion_tokens": response.usage.completion_tokens
-            }
-            
-            return translation, performance_stats
-            
-        except Exception as e:
-            print(f"Translation failed: {str(e)}")
-            return "", {"translation_time": 0, "total_tokens": 0, "tokens_per_second": 0}
+            try:
+                response = await self.client.chat.completions.create(
+                    model=self.config.model,
+                    messages=[
+                        {"role": "system", "content": "You are an expert translator specializing in Chinese cultivation novels."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=self.config.temperature,
+                    max_tokens=self.config.max_tokens
+                )
+                
+                translation = response.choices[0].message.content
+                
+                # Clean up reasoning tags or code blocks that might appear
+                translation = re.sub(r'<think>.*?</think>', '', translation, flags=re.DOTALL).strip()
+                translation = re.sub(r'^```.*?```$', '', translation, flags=re.DOTALL | re.MULTILINE).strip()
+                
+                translation_time = time.time() - start_time
+                total_tokens = response.usage.total_tokens
+                tokens_per_second = total_tokens / translation_time if translation_time > 0 else 0
+                
+                performance_stats = {
+                    "translation_time": translation_time,
+                    "total_tokens": total_tokens,
+                    "tokens_per_second": tokens_per_second,
+                    "prompt_tokens": response.usage.prompt_tokens,
+                    "completion_tokens": response.usage.completion_tokens,
+                    "retry_count": retry_count
+                }
+                
+                if retry_count > 0:
+                    print(f"Chapter {chapter_num}: Success after {retry_count} retries")
+                
+                return translation, performance_stats
+                
+            except Exception as e:
+                retry_count += 1
+                error_msg = str(e)
+                
+                # Check if this is a retryable error
+                retryable_errors = [
+                    "connection", "timeout", "network", "503", "502", "500", 
+                    "rate limit", "temporarily unavailable", "internal server error"
+                ]
+                
+                is_retryable = any(keyword.lower() in error_msg.lower() for keyword in retryable_errors)
+                
+                if attempt < self.config.max_retries and is_retryable:
+                    # Exponential backoff with jitter
+                    delay = self.config.base_retry_delay * (2 ** attempt) + random.uniform(0, 1)
+                    print(f"Chapter {chapter_num}: Retryable error on attempt {attempt + 1}/{self.config.max_retries + 1}: {error_msg}")
+                    print(f"Chapter {chapter_num}: Retrying in {delay:.1f}s...")
+                    await asyncio.sleep(delay)
+                else:
+                    print(f"Chapter {chapter_num}: Translation failed after {retry_count} retries: {error_msg}")
+                    return "", {
+                        "translation_time": 0, 
+                        "total_tokens": 0, 
+                        "tokens_per_second": 0,
+                        "retry_count": retry_count,
+                        "error": error_msg
+                    }
+        
+        # Should never reach here, but just in case
+        return "", {
+            "translation_time": 0, 
+            "total_tokens": 0, 
+            "tokens_per_second": 0,
+            "retry_count": retry_count,
+            "error": "Max retries exceeded"
+        }
     
-    def calculate_basic_similarity(self, translation: str, ground_truth: str) -> float:     # Calculate word overlap similarity
+    def calculate_basic_similarity(self, translation: str, ground_truth: str) -> float:
+        """Calculate word overlap similarity"""
         trans_words = set(translation.lower().split())
         truth_words = set(ground_truth.lower().split())
         
@@ -185,8 +231,8 @@ Please provide a high-quality English translation:"""
                 print(f"Error loading chapter {chapter_num}: {e}")
                 return None
             
-            # Translate with DeepSeek (async)
-            translation, performance_stats = await self.translate_chapter_async(chinese_text)
+            # Translate with DeepSeek (async with retry)
+            translation, performance_stats = await self.translate_chapter_async(chinese_text, chapter_num)
             
             if not translation:
                 print(f"Translation failed for chapter {chapter_num}")
@@ -209,11 +255,13 @@ Please provide a high-quality English translation:"""
                 tokens_per_second=performance_stats["tokens_per_second"],
                 basic_similarity=basic_similarity,
                 processing_time=total_time,
+                retry_count=performance_stats.get("retry_count", 0),
                 timestamp=datetime.now().isoformat()
             )
             
             # Show completion
-            print(f"Chapter {chapter_num} complete ({performance_stats['translation_time']:.1f}s, {performance_stats['total_tokens']} tokens, similarity: {basic_similarity:.3f})")
+            retry_info = f" (after {performance_stats.get('retry_count', 0)} retries)" if performance_stats.get('retry_count', 0) > 0 else ""
+            print(f"Chapter {chapter_num} complete ({performance_stats['translation_time']:.1f}s, {performance_stats['total_tokens']} tokens, similarity: {basic_similarity:.3f}){retry_info}")
             
             return metrics
     
@@ -229,6 +277,7 @@ Please provide a high-quality English translation:"""
         avg_tokens_per_sec = sum(m.tokens_per_second for m in self.metrics) / len(self.metrics)
         total_tokens = sum(m.tokens_used for m in self.metrics)
         total_translation_time = sum(m.translation_time for m in self.metrics)
+        total_retries = sum(m.retry_count for m in self.metrics)
         
         analytics = {
             "config": asdict(self.config),
@@ -241,8 +290,14 @@ Please provide a high-quality English translation:"""
                 "total_tokens_used": total_tokens,
                 "total_translation_time": round(total_translation_time, 1),
                 "avg_translation_time_per_chapter": round(total_translation_time / len(self.metrics), 1),
+                "total_retries": total_retries,
+                "chapters_requiring_retries": sum(1 for m in self.metrics if m.retry_count > 0),
                 "parallel_processing": True,
-                "max_concurrent_requests": self.config.max_concurrent
+                "max_concurrent_requests": self.config.max_concurrent,
+                "retry_configuration": {
+                    "max_retries": self.config.max_retries,
+                    "base_retry_delay": self.config.base_retry_delay
+                }
             },
             "chapter_metrics": [asdict(m) for m in self.metrics],
             "generated_at": datetime.now().isoformat()
@@ -259,6 +314,7 @@ Please provide a high-quality English translation:"""
         print(f"Model: {self.config.model}")
         print(f"Temperature: {self.config.temperature}")
         print(f"Max concurrent requests: {self.config.max_concurrent}")
+        print(f"Max retries per chapter: {self.config.max_retries}")
         print(f"Processing chapters {self.config.start_chapter}-{self.config.end_chapter}")
         
         start_time = time.time()
@@ -303,11 +359,14 @@ Please provide a high-quality English translation:"""
             avg_speed = sum(m.tokens_per_second for m in successful_metrics) / len(successful_metrics)
             total_tokens = sum(m.tokens_used for m in successful_metrics)
             avg_translation_time = sum(m.translation_time for m in successful_metrics) / len(successful_metrics)
+            total_retries = sum(m.retry_count for m in successful_metrics)
+            chapters_with_retries = sum(1 for m in successful_metrics if m.retry_count > 0)
             
             print(f"Average similarity: {avg_similarity:.3f}")
             print(f"Average speed: {avg_speed:.1f} tokens/sec")
             print(f"Total tokens: {total_tokens}")
             print(f"Average translation time per chapter: {avg_translation_time:.1f}s")
+            print(f"Total retries: {total_retries} ({chapters_with_retries} chapters required retries)")
             print(f"Speed improvement: ~{len(successful_metrics)}x faster than sequential")
         
         self.save_final_analytics()
@@ -319,7 +378,9 @@ def main():
         model="deepseek-chat",
         temperature=1.3,
         max_tokens=8192,
-        max_concurrent=10
+        max_concurrent=10,
+        max_retries=3,
+        base_retry_delay=2.0
     )
     
     # Check API key
@@ -342,6 +403,8 @@ def main():
     print(f"  Temperature: {config.temperature}")
     print(f"  Max tokens: {config.max_tokens}")
     print(f"  Max concurrent: {config.max_concurrent}")
+    print(f"  Max retries: {config.max_retries}")
+    print(f"  Base retry delay: {config.base_retry_delay}s")
     print(f"  Chapters: {config.start_chapter}-{config.end_chapter}")
     print(f"  Chinese dir: {config.chinese_chapters_dir}")
     print(f"  English dir: {config.english_chapters_dir}")

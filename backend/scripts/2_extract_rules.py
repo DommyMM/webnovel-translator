@@ -384,12 +384,11 @@ Be concise. Focus only on abstract principles that will apply broadly across man
                 traceback.print_exc()
                 return None
 
-class AsyncRuleLearningPipeline:    
-    """Run rule extraction in parallel across multiple chapters using async"""
-    
+class AsyncRuleLearningPipeline:
     def __init__(self, config: LearningConfig):
         self.config = config
         self.setup_directories()
+        Path(self.config.rules_database_file).parent.mkdir(parents=True, exist_ok=True)
     
     def setup_directories(self):
         Path(self.config.output_dir).mkdir(exist_ok=True)

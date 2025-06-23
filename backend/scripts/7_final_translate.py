@@ -1,5 +1,6 @@
 import asyncio
 import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor
 import time
 import json
 import os
@@ -256,8 +257,8 @@ class AsyncFinalTranslator:
         self.rules = rules
         
         # File paths
-        self.chinese_file = f"../data/chapters/chinese/chapter_{chapter_num:04d}_cn.txt"
-        self.ground_truth_file = f"../data/chapters/english/chapter_{chapter_num:04d}_en.txt"
+        self.chinese_file = f"../data/chapters/clean/chapter_{chapter_num:04d}_cn.txt"
+        self.ground_truth_file = f"../data/chapters/ground_truth/chapter_{chapter_num:04d}_en.txt"
         self.output_file = f"../results/final/translations/chapter_{chapter_num:04d}_final.txt"
         
         # Setup output directory
