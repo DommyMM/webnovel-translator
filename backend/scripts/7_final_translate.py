@@ -290,31 +290,39 @@ class AsyncFinalTranslator:
         return chinese_text, ground_truth
     
     async def translate_with_rag_and_rules(self, chinese_text: str, terminology: Dict[str, str]) -> str:
-        # Build prompt with rules and terminology
+        # Build style rules text
         rules_text = "\n".join([f"- {rule}" for rule in self.rules])
         
-        terminology_text = ""
+        # Build terminology examples (not exact mappings!)
+        terminology_examples = ""
         if terminology:
-            terminology_text = "\nTERMINOLOGY MAPPINGS (use these exact translations):\n"
+            terminology_examples = "\nRELEVANT PROFESSIONAL TRANSLATION EXAMPLES:\n"
+            terminology_examples += "These are terminology choices from professional translations of similar contexts:\n\n"
+            
             for chinese_term, english_term in terminology.items():
-                terminology_text += f"- {chinese_term} = {english_term}\n"
+                terminology_examples += f"• {chinese_term} → {english_term}\n"
+            
+            terminology_examples += "\nUse these examples to maintain consistency with professional standards.\n"
         
-        prompt = f"""You are translating a Chinese cultivation novel. Your task is to translate the following Chinese chapter to English with perfect terminology consistency and style.
+        prompt = f"""You are translating a Chinese cultivation novel. Create a natural English translation that learns from professional translation patterns.
 
-Follow these style rules and use the provided terminology mappings exactly.
-
-STYLE RULES:
+STYLE PATTERNS (learned from professional translations):
 {rules_text}
-{terminology_text}
+
+{terminology_examples}
+
 CHINESE TEXT:
 {chinese_text}
 
-Please provide a high-quality English translation following the rules and terminology above."""
+Translate naturally, using the professional examples as guidance for terminology consistency:"""
 
         try:
             response = await self.client.chat.completions.create(
                 model="deepseek-chat",
-                messages=[{"role": "user", "content": prompt}],
+                messages=[
+                    {"role": "system", "content": "You are an expert translator. Learn from professional examples to maintain consistency while preserving natural flow."},
+                    {"role": "user", "content": prompt}
+                ],
                 temperature=1.3,
                 max_tokens=8192,
             )
