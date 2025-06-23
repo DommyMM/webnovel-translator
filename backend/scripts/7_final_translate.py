@@ -277,27 +277,33 @@ class ChromaRAGQuerySystem:
         return self.query_terminology_parallel(chinese_text, max_results, similarity_threshold)
 
 class AsyncFinalTranslator:
-    def __init__(self, chapter_num: int, rules: List[str], shared_rag=None):
+    def __init__(self, chapter_num: int, rules: List[str], shared_rag=None, debug=False, dry_run=False):
         self.chapter_num = chapter_num
         self.rules = rules
+        self.debug = debug
+        self.dry_run = dry_run
         
         # File paths
         self.chinese_file = f"../data/chapters/clean/chapter_{chapter_num:04d}_cn.txt"
         self.ground_truth_file = f"../data/chapters/ground_truth/chapter_{chapter_num:04d}_en.txt"
         self.output_file = f"../results/final/translations/chapter_{chapter_num:04d}_final.txt"
+        self.debug_file = f"../debug/prompts/chapter_{chapter_num:04d}_final_prompt.txt"
         
-        # Setup output directory
+        # Setup output directories
         Path("../results/final/translations").mkdir(exist_ok=True, parents=True)
+        if self.debug or self.dry_run:
+            Path("../debug/prompts").mkdir(exist_ok=True, parents=True)
         
         # Use shared RAG instance
         self.rag = shared_rag
         
-        # Initialize OpenAI client
-        self.client = AsyncOpenAI(
-            api_key=os.getenv("DEEPSEEK_API_KEY"),
-            base_url="https://api.deepseek.com"
-        )
-    
+        # Initialize OpenAI client (only if not dry run)
+        if not self.dry_run:
+            self.client = AsyncOpenAI(
+                api_key=os.getenv("DEEPSEEK_API_KEY"),
+                base_url="https://api.deepseek.com"
+            )
+
     def load_chapter_files(self) -> Tuple[str, str]:
         if not Path(self.chinese_file).exists():
             raise FileNotFoundError(f"Chinese file not found: {self.chinese_file}")
@@ -328,7 +334,9 @@ class AsyncFinalTranslator:
             
             terminology_examples += "\nUse these examples to maintain consistency with professional standards.\n"
         
-        prompt = f"""You are translating a Chinese cultivation novel. Create a natural English translation that learns from professional translation patterns.
+        system_message = "You are an expert translator. Learn from professional examples to maintain consistency while preserving natural flow."
+        
+        user_prompt = f"""You are translating a Chinese cultivation novel. Create a natural English translation that learns from professional translation patterns.
 
 STYLE PATTERNS (learned from professional translations):
 {rules_text}
@@ -340,12 +348,46 @@ CHINESE TEXT:
 
 Translate naturally, using the professional examples as guidance for terminology consistency:"""
 
+        # Save debug information if enabled
+        if self.debug or self.dry_run:
+            debug_content = f"""=== CHAPTER {self.chapter_num} FINAL TRANSLATION PROMPT ===
+Generated at: {time.strftime('%Y-%m-%d %H:%M:%S')}
+Total terminology found: {len(terminology)}
+Mode: {'DRY RUN' if self.dry_run else 'LIVE TRANSLATION'}
+
+=== TERMINOLOGY RETRIEVED ===
+{json.dumps(terminology, indent=2, ensure_ascii=False)}
+
+=== SYSTEM MESSAGE ===
+{system_message}
+
+=== USER PROMPT ===
+{user_prompt}
+
+=== PROMPT STATS ===
+System message length: {len(system_message)} chars
+User prompt length: {len(user_prompt)} chars
+Total prompt length: {len(system_message) + len(user_prompt)} chars
+Terminology count: {len(terminology)}
+
+=== END DEBUG ===
+"""
+        
+            with open(self.debug_file, 'w', encoding='utf-8') as f:
+                f.write(debug_content)
+            
+            print(f"Chapter {self.chapter_num}: Debug prompt saved to {self.debug_file}")
+
+        # Return early if dry run
+        if self.dry_run:
+            return f"[DRY RUN] Prompt constructed successfully for Chapter {self.chapter_num}"
+
         try:
             response = await self.client.chat.completions.create(
                 model="deepseek-chat",
                 messages=[
-                    {"role": "system", "content": "You are an expert translator. Learn from professional examples to maintain consistency while preserving natural flow."},
-                    {"role": "user", "content": prompt}
+                    {"role": "system", "content": system_message},
+                    {"role": "user", "content": user_prompt}
                 ],
                 temperature=1.3,
                 max_tokens=8192,
@@ -359,64 +401,77 @@ Translate naturally, using the professional examples as guidance for terminology
     
     async def process_chapter_async(self, semaphore):
         async with semaphore:
-            print(f"Starting Chapter {self.chapter_num} final translation (Rules + Parallel ChromaRAG)")
-            
             start_time = time.time()
             
-            # Load input files
             try:
-                chinese_text, ground_truth = self.load_chapter_files()
-                print(f"Chapter {self.chapter_num}: Loaded files - Chinese: {len(chinese_text)} chars")
-            except FileNotFoundError as e:
-                print(f"Chapter {self.chapter_num}: Error loading: {e}")
-                return None
-            
-            # Query ChromaDB for relevant terminology using parallel line-by-line chunking
-            print(f"Chapter {self.chapter_num}: Querying ChromaDB for terminology (parallel processing)")
-            rag_start = time.time()
-            
-            # Run RAG query in thread pool to avoid blocking async loop
-            loop = asyncio.get_event_loop()
-            terminology = await loop.run_in_executor(
-                None, 
-                self.rag.query_terminology_parallel, 
-                chinese_text, 
-                10,  # max_results
-                0.2, # similarity_threshold  
-                8    # max_workers
-            )
-            
-            rag_elapsed = time.time() - rag_start
-            print(f"Chapter {self.chapter_num}: Found {len(terminology)} RAG mappings in {rag_elapsed:.1f}s")
-            
-            if terminology:
-                print(f"Chapter {self.chapter_num}: Sample terminology: {dict(list(terminology.items())[:3])}")
-            
-            # Translate with rules and RAG
-            print(f"Chapter {self.chapter_num}: Translating with rules and RAG terminology")
-            translation = await self.translate_with_rag_and_rules(chinese_text, terminology)
-            
-            # Save translation
-            with open(self.output_file, 'w', encoding='utf-8') as f:
-                f.write(translation)
-            
-            elapsed = time.time() - start_time
-            print(f"Chapter {self.chapter_num}: Completed in {elapsed:.1f}s (RAG: {rag_elapsed:.1f}s)")
-            print(f"Chapter {self.chapter_num}: Output length: {len(translation)} chars")
-            print(f"Chapter {self.chapter_num}: Saved to: {self.output_file}")
-            
-            return {
-                "chapter": self.chapter_num,
-                "success": True,
-                "output_file": self.output_file,
-                "chinese_length": len(chinese_text),
-                "translation_length": len(translation),
-                "terminology_count": len(terminology),
-                "elapsed_time": elapsed,
-                "rag_time": rag_elapsed
-            }
+                mode = "DRY RUN" if self.dry_run else "LIVE"
+                print(f"Starting Chapter {self.chapter_num} final translation ({mode} - Rules + Parallel ChromaRAG)")
+                
+                # Load input files
+                try:
+                    chinese_text, ground_truth = self.load_chapter_files()
+                    print(f"Chapter {self.chapter_num}: Loaded files - Chinese: {len(chinese_text)} chars")
+                except FileNotFoundError as e:
+                    print(f"Chapter {self.chapter_num}: Error loading: {e}")
+                    return None
+                
+                # Query ChromaDB for relevant terminology using parallel line-by-line chunking
+                print(f"Chapter {self.chapter_num}: Querying ChromaDB for terminology (parallel processing)")
+                rag_start = time.time()
+                
+                # Run RAG query in thread pool to avoid blocking async loop
+                loop = asyncio.get_event_loop()
+                terminology = await loop.run_in_executor(
+                    None, 
+                    self.rag.query_terminology_parallel, 
+                    chinese_text, 
+                    10,  # max_results
+                    0.2, # similarity_threshold  
+                    8    # max_workers
+                )
+                
+                rag_elapsed = time.time() - rag_start
+                print(f"Chapter {self.chapter_num}: Found {len(terminology)} RAG mappings in {rag_elapsed:.1f}s")
+                
+                if terminology:
+                    print(f"Chapter {self.chapter_num}: Sample terminology: {dict(list(terminology.items())[:3])}")
+                
+                # Translate with rules and RAG
+                print(f"Chapter {self.chapter_num}: Translating with rules and RAG terminology")
+                translation = await self.translate_with_rag_and_rules(chinese_text, terminology)
+                
+                # Only save actual translation if not dry run
+                if not self.dry_run:
+                    with open(self.output_file, 'w', encoding='utf-8') as f:
+                        f.write(translation)
+                    print(f"Chapter {self.chapter_num}: Saved to: {self.output_file}")
+                else:
+                    print(f"Chapter {self.chapter_num}: Dry run complete - no translation file saved")
+                
+                elapsed = time.time() - start_time
+                print(f"Chapter {self.chapter_num}: Completed in {elapsed:.1f}s (RAG: {rag_elapsed:.1f}s)")
+                print(f"Chapter {self.chapter_num}: Output length: {len(translation)} chars")
+                
+                return {
+                    "chapter": self.chapter_num,
+                    "success": True,
+                    "output_file": self.output_file,
+                    "chinese_length": len(chinese_text),
+                    "translation_length": len(translation),
+                    "terminology_count": len(terminology),
+                    "elapsed_time": elapsed,
+                    "rag_time": rag_elapsed
+                }
 
-async def translate_chapters_with_rag(start_chapter: int, end_chapter: int, max_concurrent: int = 3, use_qwen3: bool = False, use_bge: bool = True):
+            except Exception as e:
+                print(f"Error processing Chapter {self.chapter_num}: {e}")
+                return {
+                    "chapter": self.chapter_num,
+                    "success": False,
+                    "error": str(e)
+                }
+
+async def translate_chapters_with_rag(start_chapter: int, end_chapter: int, max_concurrent: int = 3, use_qwen3: bool = False, use_bge: bool = True, debug: bool = False, dry_run: bool = False):
     # Load style rules from step 3
     rules_file = "../data/rules/cleaned.json"
     if not Path(rules_file).exists():
@@ -442,11 +497,17 @@ async def translate_chapters_with_rag(start_chapter: int, end_chapter: int, max_
     # Create translators for each chapter
     translators = []
     for chapter_num in range(start_chapter, end_chapter + 1):
-        translator = AsyncFinalTranslator(chapter_num, rules, shared_rag=shared_rag)
+        translator = AsyncFinalTranslator(chapter_num, rules, shared_rag=shared_rag, debug=debug, dry_run=dry_run)
         translators.append(translator)
     
     # Process chapters concurrently
-    print(f"Processing chapters {start_chapter}-{end_chapter} with {max_concurrent} concurrent requests")
+    mode = "DRY RUN" if dry_run else "LIVE TRANSLATION"
+    print(f"Processing chapters {start_chapter}-{end_chapter} with {max_concurrent} concurrent requests ({mode})")
+    if debug or dry_run:
+        print("Debug mode enabled - prompts will be saved to ../debug/prompts/")
+    if dry_run:
+        print("DRY RUN MODE - No API calls will be made")
+    
     tasks = [translator.process_chapter_async(semaphore) for translator in translators]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     
@@ -463,12 +524,15 @@ async def translate_chapters_with_rag(start_chapter: int, end_chapter: int, max_
         else:
             print(f"Failed result: {result}")
     
-    print(f"\nFinal Translation Complete")
+    print(f"\n{mode} Complete")
     print(f"Successful chapters: {successful}/{len(translators)}")
     print(f"Total time: {total_time:.1f}s")
     print(f"Average time per chapter: {total_time/len(translators):.1f}s")
     print(f"Average terminology per chapter: {total_terminology/len(translators):.1f}")
-    print(f"Output directory: ../results/final/translations/")
+    if not dry_run:
+        print(f"Output directory: ../results/final/translations/")
+    if debug or dry_run:
+        print(f"Debug prompts saved to: ../debug/prompts/")
 
 def test_chroma_rag_system():
     print("Testing ChromaDB RAG System")
@@ -506,6 +570,8 @@ def main():
     parser.add_argument("--test", action="store_true", help="Test RAG system only")
     parser.add_argument("--qwen", action="store_true", help="Use Qwen3-8B embeddings instead of BGE-M3")
     parser.add_argument("--lite", action="store_true", help="Use basic embeddings instead of BGE-M3")
+    parser.add_argument("--debug", action="store_true", help="Save full prompts to debug folder")
+    parser.add_argument("--dry-run", action="store_true", help="Build prompts without sending to API")
     
     args = parser.parse_args()
     
@@ -541,7 +607,9 @@ def main():
             end_chapter=args.end,
             max_concurrent=args.concurrent,
             use_qwen3=use_qwen3,
-            use_bge=use_bge
+            use_bge=use_bge,
+            debug=args.debug,
+            dry_run=args.dry_run
         ))
     except KeyboardInterrupt:
         print("\nTranslation interrupted by user")
