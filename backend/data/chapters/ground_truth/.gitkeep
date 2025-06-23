@@ -1,0 +1,6 @@
+Place ground truth English translation files here.
+
+Expected format: chapter_XXXX_en.txt
+Example: chapter_0001_en.txt, chapter_0002_en.txt, etc.
+
+These serve as reference translations for rule extraction and evaluation.

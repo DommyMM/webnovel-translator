@@ -1,0 +1,5 @@
+Place raw scraped chapter files here.
+
+Expected format: Raw HTML, text, or other scraped content before cleaning.
+
+These files are processed by the cleaning pipeline to generate clean chapters.

@@ -3,7 +3,4 @@
 *.pyc
 *.json
 *.txt
-clean/
-ground_truth/
-raw/
 chroma_db*/
