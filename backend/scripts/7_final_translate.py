@@ -16,28 +16,41 @@ from openai import AsyncOpenAI
 load_dotenv()
 
 
-def chunk_chinese_text_by_lines(text):
-    lines = text.split('\n')
+def chunk_chinese_text_by_semantic_units(text):
+    # Major punctuation that creates semantic boundaries
+    major_punctuation = ['？', '。', '！', '；', '：', '?', '.', '!', ';', ':']
+    # Minor punctuation to clean from boundaries  
+    minor_punctuation = ['"', '"', '——', '（', '）', '(', ')']
     
-    # Clean up lines
-    cleaned_lines = []
+    lines = text.split('\n')
+    semantic_units = []
+    
     for line in lines:
         line = line.strip()
-        # Skip empty lines, chapter headers, and very short lines
-        if len(line) >= 5 and not line.startswith('第') and not line.startswith('﻿'):
-            cleaned_lines.append(line)
+        if len(line) < 5 or line.startswith('第') or line.startswith('﻿'):
+            continue
+            
+        # Split by major punctuation to create focused semantic units
+        current_units = [line]
+        for punct in major_punctuation:
+            new_units = []
+            for unit in current_units:
+                parts = unit.split(punct)
+                for part in parts:
+                    # Clean up minor punctuation and whitespace
+                    for minor in minor_punctuation:
+                        part = part.replace(minor, ' ')
+                    part = part.strip()
+                    
+                    # Only keep substantial semantic units
+                    if len(part) >= 5:
+                        new_units.append(part)
+            current_units = new_units
+        
+        semantic_units.extend(current_units)
     
-    return cleaned_lines
+    return semantic_units
 
-class Qwen3EmbeddingFunction(EmbeddingFunction):
-    def __init__(self, model_name="Qwen/Qwen3-Embedding-8B"):
-        import torch
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.model = SentenceTransformer(model_name, device=device)
-    
-    def __call__(self, texts: List[str]) -> List[List[float]]:
-        embeddings = self.model.encode(texts, convert_to_numpy=True)
-        return embeddings.tolist()
 
 class BGEEmbeddingFunction(EmbeddingFunction):
     def __init__(self, model_name="BAAI/bge-m3"):
@@ -55,6 +68,7 @@ class ChromaRAGQuerySystem:
         self.use_bge = use_bge
         self.qwen_model = qwen_model
         
+        # Set database path based on embedding choice
         if use_bge:
             self.db_path = "../data/terminology/chroma_db_bge"
             self.collection_name = "bge_terminology"
@@ -73,40 +87,37 @@ class ChromaRAGQuerySystem:
         
         print(f"Loading ChromaDB from: {self.db_path}")
         
-        # Create client
         self.client = chromadb.PersistentClient(path=self.db_path)
         
-        # Setup embedding function
+        # Setup embedding function based on configuration
         if self.use_bge:
             try:
                 self.embedding_function = BGEEmbeddingFunction("BAAI/bge-m3")
                 print(f"Using BGE-M3 embeddings")
             except Exception as e:
                 print(f"Failed to load BGE model: {e}")
-                print("Falling back to sentence-transformers")
-                self.use_bge = False
-                self.embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
-                    model_name="sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
-                )
+                self._fallback_to_basic()
         elif self.use_qwen3:
             try:
-                self.embedding_function = Qwen3EmbeddingFunction(
-                    model_name=self.qwen_model
-                )
+                from sentence_transformers import SentenceTransformer
+                class Qwen3EmbeddingFunction(EmbeddingFunction):
+                    def __init__(self, model_name):
+                        import torch
+                        device = "cuda" if torch.cuda.is_available() else "cpu"
+                        self.model = SentenceTransformer(model_name, device=device)
+                    def __call__(self, texts: List[str]) -> List[List[float]]:
+                        embeddings = self.model.encode(texts, convert_to_numpy=True)
+                        return embeddings.tolist()
+                
+                self.embedding_function = Qwen3EmbeddingFunction(self.qwen_model)
                 print(f"Using Qwen3 embeddings: {self.qwen_model}")
             except Exception as e:
                 print(f"Failed to load Qwen3 model: {e}")
-                print("Falling back to sentence-transformers")
-                self.use_qwen3 = False
-                self.embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
-                    model_name="sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
-                )
+                self._fallback_to_basic()
         else:
-            self.embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
-                model_name="sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
-            )
+            self._fallback_to_basic()
         
-        # Get collection
+        # Load collection
         try:
             self.collection = self.client.get_collection(
                 name=self.collection_name,
@@ -122,111 +133,44 @@ class ChromaRAGQuerySystem:
             print("Available collections:", self.client.list_collections())
             raise
     
-    def query_terminology(self, chinese_text: str, max_results: int = 10, similarity_threshold: float = 0.2) -> Dict[str, str]:
-        """
-        Query ChromaDB for terminology using line-by-line chunking for better similarity scores
-        
-        Args:
-            chinese_text: Input Chinese text (full chapter)
-            max_results: Maximum number of similar terms to return per line
-            similarity_threshold: Minimum similarity score (0-1)
-        
-        Returns:
-            Dict mapping Chinese terms to English translations
-        """
-        if not chinese_text.strip():
-            return {}
-        
-        try:
-            # Chunk text into lines for better similarity matching
-            lines = chunk_chinese_text_by_lines(chinese_text)
-            print(f"Split text into {len(lines)} lines for RAG query")
-            
-            all_terminology = {}
-            
-            # Query each line separately
-            for i, line in enumerate(lines):
-                if len(line.strip()) < 5:  # Skip very short lines
-                    continue
-                
-                try:
-                    # Query ChromaDB with individual line
-                    results = self.collection.query(
-                        query_texts=[line],
-                        n_results=max_results,
-                        include=['documents', 'metadatas', 'distances']
-                    )
-                    
-                    # Process results for this line
-                    for doc, metadata, distance in zip(
-                        results['documents'][0], 
-                        results['metadatas'][0], 
-                        results['distances'][0]
-                    ):
-                        chinese_term = doc
-                        english_term = metadata['english_term']
-                        
-                        # Convert distance to similarity
-                        similarity = 1.0 - distance
-                        
-                        # Apply similarity threshold
-                        if similarity >= similarity_threshold:
-                            # Avoid duplicates - keep highest similarity
-                            if chinese_term not in all_terminology or similarity > all_terminology.get(f"{chinese_term}_sim", 0):
-                                all_terminology[chinese_term] = english_term
-                                all_terminology[f"{chinese_term}_sim"] = similarity
-                                print(f"Found: {chinese_term} → {english_term} (similarity: {similarity:.3f}) [Line {i+1}]")
-                
-                except Exception as e:
-                    print(f"Error querying line {i+1}: {e}")
-                    continue
-            
-            # Clean up - remove the similarity tracking keys
-            final_terminology = {k: v for k, v in all_terminology.items() if not k.endswith('_sim')}
-            
-            print(f"Retrieved {len(final_terminology)} terminology mappings total")
-            return final_terminology
-            
-        except Exception as e:
-            print(f"Error querying ChromaDB: {e}")
-            return {}
+    def _fallback_to_basic(self):
+        print("Falling back to basic multilingual embeddings")
+        self.embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
+            model_name="sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+        )
     
-    def query_chapter(self, chinese_text: str) -> Dict[str, str]:
-        return self.query_terminology(chinese_text)
-
-    def query_terminology_parallel(self, chinese_text: str, max_results: int = 10, similarity_threshold: float = 0.2, max_workers: int = 8) -> Dict[str, str]:
+    def query_terminology_parallel(self, chinese_text: str, max_results: int = 10, similarity_threshold: float = 0.15, max_workers: int = 8) -> Dict[str, str]:
         if not chinese_text.strip():
             return {}
         
         try:
-            # Chunk text into lines
-            lines = chunk_chinese_text_by_lines(chinese_text)
-            print(f"Split text into {len(lines)} lines for parallel RAG query")
+            # Use improved semantic chunking
+            semantic_units = chunk_chinese_text_by_semantic_units(chinese_text)
+            print(f"Split text into {len(semantic_units)} semantic units for RAG query")
             
             all_terminology = {}
             
-            # Process lines in parallel using ThreadPoolExecutor
+            # Process semantic units in parallel
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                # Submit all line queries concurrently
-                future_to_line = {
-                    executor.submit(self._query_single_line, i, line, max_results, similarity_threshold): (i, line)
-                    for i, line in enumerate(lines) if len(line.strip()) >= 5
+                future_to_unit = {
+                    executor.submit(self._query_single_unit, i, unit, max_results, similarity_threshold): (i, unit)
+                    for i, unit in enumerate(semantic_units) if len(unit.strip()) >= 5
                 }
                 
                 # Collect results as they complete
-                for future in concurrent.futures.as_completed(future_to_line):
-                    i, line = future_to_line[future]
+                for future in concurrent.futures.as_completed(future_to_unit):
+                    i, unit = future_to_unit[future]
                     try:
-                        line_terminology = future.result()
+                        unit_terminology = future.result()
                         
                         # Merge results, keeping highest similarity for duplicates
-                        for chinese_term, (english_term, similarity) in line_terminology.items():
+                        for chinese_term, (english_term, similarity) in unit_terminology.items():
                             if chinese_term not in all_terminology or similarity > all_terminology[chinese_term][1]:
                                 all_terminology[chinese_term] = (english_term, similarity)
-                                print(f"Found: {chinese_term} → {english_term} (similarity: {similarity:.3f}) [Line {i+1}]")
+                                print(f"Found: {chinese_term} → {english_term} (similarity: {similarity:.3f}) [Unit {i+1}]")
                                 
                     except Exception as e:
-                        print(f"Error processing line {i+1}: {e}")
+                        print(f"Error processing unit {i+1}: {e}")
                         continue
             
             # Convert to final format (remove similarity scores)
@@ -239,16 +183,12 @@ class ChromaRAGQuerySystem:
             print(f"Error in parallel ChromaDB query: {e}")
             return {}
     
-    def _query_single_line(self, line_index: int, line: str, max_results: int, similarity_threshold: float) -> Dict[str, Tuple[str, float]]:
-        """
-        Query a single line against ChromaDB
-        Returns dict of {chinese_term: (english_term, similarity)}
-        """
-        line_terminology = {}
+    def _query_single_unit(self, unit_index: int, unit: str, max_results: int, similarity_threshold: float) -> Dict[str, Tuple[str, float]]:
+        unit_terminology = {}
         
         try:
             results = self.collection.query(
-                query_texts=[line],
+                query_texts=[unit],
                 n_results=max_results,
                 include=['documents', 'metadatas', 'distances']
             )
@@ -262,19 +202,14 @@ class ChromaRAGQuerySystem:
                 english_term = metadata['english_term']
                 similarity = 1.0 - distance
                 
-                if similarity >= similarity_threshold:
-                    line_terminology[chinese_term] = (english_term, similarity)
+                if similarity >= 0.15:  # Lower threshold to catch context-diluted terms
+                    unit_terminology[chinese_term] = (english_term, similarity)
                     
         except Exception as e:
             # Don't print here to avoid thread collision in logs
             pass
             
-        return line_terminology
-    
-    # Keep the original method as fallback
-    def query_terminology(self, chinese_text: str, max_results: int = 10, similarity_threshold: float = 0.2) -> Dict[str, str]:
-        """Use parallel version by default"""
-        return self.query_terminology_parallel(chinese_text, max_results, similarity_threshold)
+        return unit_terminology
 
 class AsyncFinalTranslator:
     def __init__(self, chapter_num: int, rules: List[str], shared_rag=None, debug=False, dry_run=False):
@@ -297,7 +232,7 @@ class AsyncFinalTranslator:
         # Use shared RAG instance
         self.rag = shared_rag
         
-        # Initialize OpenAI client (only if not dry run)
+        # Initialize OpenAI client only if not dry run
         if not self.dry_run:
             self.client = AsyncOpenAI(
                 api_key=os.getenv("DEEPSEEK_API_KEY"),
@@ -415,7 +350,7 @@ Terminology count: {len(terminology)}
                     print(f"Chapter {self.chapter_num}: Error loading: {e}")
                     return None
                 
-                # Query ChromaDB for relevant terminology using parallel line-by-line chunking
+                # Query ChromaDB for relevant terminology using parallel semantic chunking
                 print(f"Chapter {self.chapter_num}: Querying ChromaDB for terminology (parallel processing)")
                 rag_start = time.time()
                 
@@ -440,7 +375,7 @@ Terminology count: {len(terminology)}
                 print(f"Chapter {self.chapter_num}: Translating with rules and RAG terminology")
                 translation = await self.translate_with_rag_and_rules(chinese_text, terminology)
                 
-                # Only save actual translation if not dry run
+                # Save actual translation only if not dry run
                 if not self.dry_run:
                     with open(self.output_file, 'w', encoding='utf-8') as f:
                         f.write(translation)
@@ -550,7 +485,7 @@ def test_chroma_rag_system():
         
         for text in test_texts:
             print(f"\nQuery: {text}")
-            results = rag.query_terminology(text, max_results=5, similarity_threshold=0.3)
+            results = rag.query_terminology_parallel(text, max_results=5, similarity_threshold=0.3)
             if results:
                 for chinese, english in results.items():
                     print(f"  {chinese} → {english}")
@@ -582,11 +517,12 @@ def main():
         test_chroma_rag_system()
         return
     
-    # Check API key
-    if not os.getenv("DEEPSEEK_API_KEY"):
+    # Check API key unless dry run
+    if not args.dry_run and not os.getenv("DEEPSEEK_API_KEY"):
         print("Error: DEEPSEEK_API_KEY not found in environment")
         return
     
+    # Determine embedding strategy
     if args.qwen:
         use_qwen3 = True
         use_bge = False
