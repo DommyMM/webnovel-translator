@@ -567,7 +567,7 @@ def main():
     config = LearningConfig(
         start_chapter=args.start,
         end_chapter=args.end,
-        model="deepseek-chat",
+        model="deepseek-reasoner",
         temperature=1.0,
         min_confidence=0.7,
         max_concurrent=args.concurrent
