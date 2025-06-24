@@ -167,7 +167,6 @@ class ChromaRAGQuerySystem:
                         for chinese_term, (english_term, similarity) in unit_terminology.items():
                             if chinese_term not in all_terminology or similarity > all_terminology[chinese_term][1]:
                                 all_terminology[chinese_term] = (english_term, similarity)
-                                print(f"Found: {chinese_term} → {english_term} (similarity: {similarity:.3f}) [Unit {i+1}]")
                                 
                     except Exception as e:
                         print(f"Error processing unit {i+1}: {e}")

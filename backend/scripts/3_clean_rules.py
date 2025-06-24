@@ -39,9 +39,10 @@ Extract and rewrite the 8-10 most actionable, high-quality translation rules. Ig
 - Incomplete sentences
 - Vague descriptions
 - Example text masquerading as rules
+- Any rules about specific terminology, word choices, or how to translate a particular term or name
 
 For each rule you keep, provide:
-**RULE_TYPE**: [terminology|style|cultural|structure]
+**RULE_TYPE**: [style|cultural|structure]
 **DESCRIPTION**: Clear, actionable principle (one sentence)
 
 Focus on rules that would meaningfully improve future translations. Be selective and prioritize quality.

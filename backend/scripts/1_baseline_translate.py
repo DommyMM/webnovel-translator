@@ -367,7 +367,6 @@ Please provide a high-quality English translation:"""
             print(f"Total tokens: {total_tokens}")
             print(f"Average translation time per chapter: {avg_translation_time:.1f}s")
             print(f"Total retries: {total_retries} ({chapters_with_retries} chapters required retries)")
-            print(f"Speed improvement: ~{len(successful_metrics)}x faster than sequential")
         
         self.save_final_analytics()
 

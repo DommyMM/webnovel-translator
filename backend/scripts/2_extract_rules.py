@@ -105,7 +105,9 @@ class AsyncRuleExtractor:
         return deepseek_text, ground_truth, chinese_text
     
     async def analyze_differences(self, deepseek_text: str, ground_truth: str, chinese_text: str) -> tuple[List[Dict], float]:        
-        prompt = f"""You are a translation expert analyzing two English translations of a Chinese cultivation novel. Extract rules that would make MY TRANSLATION more like the PROFESSIONAL REFERENCE (ground truth).
+        prompt = f"""You are a translation expert analyzing two English translations of a Chinese cultivation novel. Extract STYLE and STRUCTURAL rules (NOT terminology) that would make MY TRANSLATION more like the PROFESSIONAL REFERENCE.
+
+NOTE: Ignore specific word/term choices - focus only on style, structure, and flow patterns.
 
 ORIGINAL CHINESE:
 {chinese_text}
@@ -116,20 +118,22 @@ MY TRANSLATION (needs improvement):
 PROFESSIONAL REFERENCE (target quality):
 {ground_truth}
 
-Analyze where MY TRANSLATION differs from the PROFESSIONAL REFERENCE and extract 3-5 core translation rules that would make future translations more like the professional reference. Focus on:
+Analyze where MY TRANSLATION differs from the PROFESSIONAL REFERENCE and extract 3-5 core translation rules focused on STYLE and STRUCTURE only. Focus on:
 
-1. **Terminology choices** - Where the professional reference uses better term choices
-2. **Style preferences** - How the professional reference handles tone, voice, formality  
-3. **Structural patterns** - How the professional reference organizes sentences/paragraphs
-4. **Cultural adaptation** - How the professional reference handles cultural elements
+1. **Style preferences** - How the professional reference handles tone, voice, formality, register
+2. **Structural patterns** - How the professional reference organizes sentences, paragraphs, dialogue
+3. **Flow and rhythm** - How the professional reference creates natural English flow
+4. **Cultural adaptation** - How the professional reference handles cultural elements and context
+
+IGNORE: Specific terminology choices, character names, technique names, realm names, etc.
 
 For each rule, provide:
-RULE_TYPE: [terminology|style|structure|cultural]
-PATTERN: What should be done to match the professional reference quality
-EXAMPLE: Specific difference showing professional reference is better
+RULE_TYPE: [style|structure|flow|cultural]
+PATTERN: What stylistic/structural approach should be used to match professional quality  
+EXAMPLE: Specific difference showing how structure/style differs (not terminology)
 CONFIDENCE: [high|medium|low]
 
-Be concise. Focus only on abstract principles that will apply broadly across many chapters, not specific word choices, and focus on learning FROM the professional reference to improve future translations."""
+Focus only on abstract stylistic and structural principles that will apply broadly across many chapters. Do NOT extract rules about specific word choices or terminology - only about HOW to write and structure the translation."""
         
         try:
             print(f"Chapter {self.chapter_num}: Making AI analysis call...")
@@ -226,17 +230,20 @@ Be concise. Focus only on abstract principles that will apply broadly across man
                 r'\*\*([^*]*(?:terminology|style|structure|cultural)[^*]*)\*\*'
             ]
             
+            # Update valid rule types (remove terminology)
+            valid_rule_types = ['style', 'structure', 'flow', 'cultural', 'general']
+            
             for pattern in type_patterns:
                 match = re.search(pattern, section, re.IGNORECASE)
                 if match:
                     rule_type = match.group(1).strip().lower()
                     # Extract just the key type if it's in a longer phrase
-                    for key_type in ['terminology', 'style', 'structure', 'cultural']:
+                    for key_type in valid_rule_types:
                         if key_type in rule_type:
                             current_rule["rule_type"] = key_type
                             break
                     else:
-                        current_rule["rule_type"] = rule_type
+                        current_rule["rule_type"] = "general"  # fallback
                     print(f"  Found rule_type: {current_rule['rule_type']}")
                     break
             
@@ -311,7 +318,22 @@ Be concise. Focus only on abstract principles that will apply broadly across man
     
     def is_valid_rule(self, rule: Dict) -> bool:
         required_fields = ["rule_type", "description", "confidence"]
-        return all(field in rule and rule[field] for field in required_fields)
+        if not all(field in rule and rule[field] for field in required_fields):
+            return False
+        
+        # Reject rules that seem to be about terminology
+        description = rule.get("description", "").lower()
+        terminology_keywords = [
+            "use the term", "translate as", "should be called", "refer to as",
+            "name should be", "terminology", "word choice", "term choice"
+        ]
+        
+        for keyword in terminology_keywords:
+            if keyword in description:
+                print(f"  Rejected terminology rule: {description[:100]}...")
+                return False
+        
+        return True
     
     def calculate_similarity(self, text1: str, text2: str) -> float:
         words1 = set(text1.lower().split())
