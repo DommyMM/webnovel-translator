@@ -5,8 +5,8 @@ A self-improving Chinese-to-English translation pipeline designed for web novels
 ## Current Status
 
 **Working Components:**
-- **Rule Learning**: Extracts style/structure patterns from professional translations via AI comparison
-- **Rule Application**: Applies learned rules for consistent translation style  
+- **Parallel Extraction**: Simultaneous rule learning and terminology extraction via AI comparison
+- **Rule Application**: Applies learned style/structure patterns for consistent translation quality
 - **RAG Terminology**: ChromaDB vector database with BGE-M3 embeddings for cultivation term mappings via semantic search
 - **Semantic Chunking**: Two-level text splitting (lines → sentences) for focused term retrieval
 - **Evaluation Pipeline**: AI-powered quality assessment comparing baseline vs final translations
@@ -18,21 +18,21 @@ A self-improving Chinese-to-English translation pipeline designed for web novels
 
 ## System Architecture
 
-### **Hybrid Translation Pipeline**
+### **Streamlined Translation Pipeline (6 Steps)**
 ```
 Chinese Input
     ↓ (Async DeepSeek)
-Baseline Translation 
-    ↓ (AI Comparison with Ground Truth)
-Style Rules Extraction 
-    ↓ (Cerebras AI Cleaning)
-Clean Style Rules 
-    ↓ (Terminology Extraction & Cleaning)
-ChromaDB RAG Database (BGE-M3 Embeddings)
+1. Baseline Translation 
+    ↓ (Parallel AI Comparison with Ground Truth)
+2a. Style Rules Extraction + 2b. Terminology Extraction (PARALLEL)
+    ↓ (Cleaning and Structuring)
+3. Clean Style Rules 
+    ↓ (ChromaDB Vector Database Build)
+4. ChromaDB RAG Database (BGE-M3 Embeddings)
     ↓ (Semantic Chunking + Rules + RAG Application)
-Final Enhanced Translation 
-    ↓ (AI Quality Evaluation)
-Quality Improvement Metrics
+5. Final Enhanced Translation 
+    ↓ (AI Quality Evaluation - Optional)
+6. Quality Improvement Metrics
 ```
 
 ### **Example Translation Flow**
@@ -44,18 +44,20 @@ Quality Improvement Metrics
 "Long Chen broke through to the Wind Gathering stage and became the Alchemy Emperor's successor"
 ```
 
-**Step 2 - Semantic Chunking + RAG Term Extraction:**
+**Step 2 - Parallel Extraction (2a + 2b simultaneously):**
 ```python
-# Semantic units: ["龙尘突破到聚气境", "成为了丹帝传人"]
-extracted_terms = ["龙尘", "聚气境", "丹帝"]
-rag_mappings = {
+# 2a: Style rules extracted
+style_rules = ["Prioritize active voice in action scenes", "Use dynamic verbs for cultivation breakthroughs"]
+
+# 2b: Terminology differences identified
+terminology_diffs = {
     "龙尘": "Long Chen",
     "聚气境": "Qi Condensation Realm",   # ← Corrects "wind gathering stage"
-    "丹帝": "Pill God"  # ← Corrects "Alchemy Emperor"
+    "丹帝": "Pill God"                   # ← Corrects "Alchemy Emperor"
 }
 ```
 
-**Step 3 - Enhanced Translation (Rules + RAG):**
+**Step 5 - Final Translation (Rules + RAG):**
 ```
 "Long Chen broke through to the Qi Condensation realm and became the Pill God's successor"
 ```
@@ -82,25 +84,23 @@ rag_mappings = {
 │       └── chroma_db/                    # MPNet vector database
 ├── scripts/
 │   ├── 1_baseline_translate.py      # Baseline translation pipeline
-│   ├── 2_extract_rules.py           # Style rule learning via AI comparison
+│   ├── 2_parallel_extraction.py     # Coordinates 2a + 2b in parallel
+│   ├── 2a_extract_rules.py          # Style rule learning via AI comparison
+│   ├── 2b_extract_terminology.py    # Terminology extraction via AI comparison
 │   ├── 3_clean_rules.py             # AI-powered rule refinement
-│   ├── 4_enhanced_translate.py      # Rules-only translation
-│   ├── 5_extract_terminology.py     # Extract terminology differences
-│   ├── 6_clean_terms.py             # Build ChromaDB vector database
-│   ├── 7_final_translate.py         # Final Rules + RAG translation
-│   ├── 8_evaluate.py                # Quality assessment pipeline
-│   ├── test_rag.py                  # RAG system testing and debugging
+│   ├── 4_build_chromadb.py          # Build ChromaDB vector database
+│   ├── 5_final_translate.py         # Final Rules + RAG translation
+│   ├── 6_evaluate.py                # Quality assessment pipeline (optional)
 │   └── scrape/                      # Data collection tools
 ├── debug/
 │   └── prompts/                     # Debug prompts (with --debug flag)
 └── results/
     ├── baseline/                    # Initial translation results
-    ├── enhanced/                    # Rules-only translation results
     ├── final/                       # Rules + RAG translation results
     └── evaluation/                  # Comparative analysis
 ```
 
-## Complete Workflow
+## Streamlined Workflow (6 Steps)
 
 ### 1. Data Collection
 ```bash
@@ -115,51 +115,64 @@ python scripts/scrape/clean.py
 python scripts/1_baseline_translate.py
 ```
 
-### 3. Rule Learning  
+### 3. Parallel Extraction (Rules + Terminology)
 ```bash
-# Extract style rules by comparing with ground truth
-python scripts/2_extract_rules.py --start 1 --end 10 --concurrent 3
+# Extract both style rules AND terminology differences simultaneously
+python scripts/2_parallel_extraction.py --start 1 --end 10 --concurrent 3
 
+# Or run individually if needed:
+# python scripts/2a_extract_rules.py --start 1 --end 10 --concurrent 3
+# python scripts/2b_extract_terminology.py --start 1 --end 10 --concurrent 2
+```
+
+### 4. Rule Cleaning
+```bash
 # Clean and filter rules with Cerebras AI
 python scripts/3_clean_rules.py
 ```
 
-### 4. Enhanced Translation (Rules Only)
+### 5. Build Vector Database
 ```bash
-# Re-translate with learned rules
-python scripts/4_enhanced_translate.py --start 1 --end 10 --concurrent 3
-```
-
-### 5. Terminology Extraction
-```bash
-# Extract terminology differences via AI comparison
-python scripts/5_extract_terminology.py --start 1 --end 10 --concurrent 2
-
 # Build ChromaDB vector database (BGE-M3 by default)
-python scripts/6_clean_terms.py
+python scripts/4_build_chromadb.py
+
+# Alternative embedding models:
+# python scripts/4_build_chromadb.py --qwen    # Qwen3-8B embeddings
+# python scripts/4_build_chromadb.py --lite    # MPNet embeddings
 ```
 
 ### 6. Final Translation (Rules + RAG)
 ```bash
 # Final translation with rules + RAG terminology (BGE-M3 by default)
-python scripts/7_final_translate.py --start 1 --end 10 --concurrent 3
+python scripts/5_final_translate.py --start 1 --end 10 --concurrent 3
 
 # Test RAG system
-python scripts/7_final_translate.py --test
+python scripts/5_final_translate.py --test
 
 # Debug prompts without API calls
-python scripts/7_final_translate.py --start 1 --end 1 --dry-run --debug
+python scripts/5_final_translate.py --start 1 --end 1 --dry-run --debug
 ```
 
-### 7. Quality Evaluation
+### 7. Quality Evaluation (Optional)
 ```bash
 # Comprehensive quality assessment
-python scripts/8_evaluate.py --start 1 --end 10 --concurrent 3
+python scripts/6_evaluate.py --start 1 --end 10 --concurrent 3
 ```
 
 ## Key Innovations
 
-### **1. Hybrid Rules + RAG Architecture**
+### **1. Parallel Extraction Architecture**
+```python
+# Steps 2a and 2b run simultaneously (same inputs: baseline + ground truth)
+async def run_parallel_extraction():
+    tasks = [
+        run_script_async("2a_extract_rules.py", args),      # Style/structure rules
+        run_script_async("2b_extract_terminology.py", args) # Terminology differences
+    ]
+    results = await asyncio.gather(*tasks)  # ~50% faster than sequential
+```
+
+### **2. Hybrid Rules + RAG Architecture**
 ```python
 # Style rules ensure consistent flow and tone
 style_rules = extract_from_professional_translations()
@@ -169,16 +182,6 @@ semantic_units = chunk_by_lines_and_sentences(chinese_text)
 rag_lookup = semantic_search_chromadb(semantic_units, threshold=0.15)
 # Combined application
 final_translation = translate_with_rules_and_rag(chinese_text, style_rules, rag_lookup)
-```
-
-### **2. AI-Powered Learning Pipeline**
-```python
-# Extract patterns by comparing translations
-rules = ai_compare(my_translation, professional_translation)
-# Clean with specialized model  
-clean_rules = cerebras_clean(raw_rules)
-# Apply in production
-final_translation = translate_with_rules_and_rag(chinese_text, clean_rules, rag_terminology)
 ```
 
 ### **3. ChromaDB Vector RAG with Semantic Chunking**
@@ -208,6 +211,7 @@ terminology = {doc: metadata['english_term'] for doc, metadata, distance in resu
 
 ### **Processing Architecture**
 - **Async Processing**: Concurrent chapter translation and evaluation
+- **Parallel Extraction**: Simultaneous rule and terminology extraction
 - **Semantic Chunking**: Two-level splitting (lines → sentences) for focused retrieval
 - **Vector RAG**: Semantic similarity search with 0.15 threshold for terminology consistency
 - **Professional Examples**: Guidance-based terminology application (not rigid replacement)
@@ -272,21 +276,19 @@ Result: "Am I the peerless Pill God who looks down on the world—Long Chen?"
 echo "DEEPSEEK_API_KEY=your_key_here" > .env
 echo "CEREBRAS_API_KEY=your_key_here" >> .env
 
-# 2. Run complete pipeline (chapters 1-3)
+# 2. Run streamlined pipeline (chapters 1-3)
 python scripts/1_baseline_translate.py
-python scripts/2_extract_rules.py --start 1 --end 3 --concurrent 3
+python scripts/2_parallel_extraction.py --start 1 --end 3 --concurrent 3    # NEW: Parallel!
 python scripts/3_clean_rules.py
-python scripts/4_enhanced_translate.py --start 1 --end 3 --concurrent 3
-python scripts/5_extract_terminology.py --start 1 --end 3 --concurrent 2
-python scripts/6_clean_terms.py  # Uses BGE-M3 by default
-python scripts/7_final_translate.py --start 1 --end 3 --concurrent 3  # Uses BGE-M3
-python scripts/8_evaluate.py --start 1 --end 3 --concurrent 3
+python scripts/4_build_chromadb.py  # Uses BGE-M3 by default
+python scripts/5_final_translate.py --start 1 --end 3 --concurrent 3        # Uses BGE-M3
+python scripts/6_evaluate.py --start 1 --end 3 --concurrent 3               # Optional
 
 # 3. Test RAG system
-python scripts/7_final_translate.py --test
+python scripts/5_final_translate.py --test
 
 # 4. Debug specific chapter
-python scripts/7_final_translate.py --start 1 --end 1 --dry-run --debug
+python scripts/5_final_translate.py --start 1 --end 1 --dry-run --debug
 
 # 5. Check results
 cat results/evaluation/reports/evaluation_report.txt
@@ -296,15 +298,15 @@ cat results/evaluation/reports/evaluation_report.txt
 
 ```bash
 # Use different embedding models
-python scripts/6_clean_terms.py --qwen    # Qwen3-8B embeddings
-python scripts/6_clean_terms.py --lite    # MPNet embeddings
+python scripts/4_build_chromadb.py --qwen    # Qwen3-8B embeddings
+python scripts/4_build_chromadb.py --lite    # MPNet embeddings
 
-python scripts/7_final_translate.py --qwen --start 1 --end 3    # Use Qwen3 RAG
-python scripts/7_final_translate.py --lite --start 1 --end 3    # Use MPNet RAG
+python scripts/5_final_translate.py --qwen --start 1 --end 3    # Use Qwen3 RAG
+python scripts/5_final_translate.py --lite --start 1 --end 3    # Use MPNet RAG
 
-# Test RAG retrieval with different models
-python scripts/test_rag.py --bge --test specific    # Test specific queries
-python scripts/test_rag.py --bge --test chapter     # Test chapter processing
+# Run individual extraction steps if needed
+python scripts/2a_extract_rules.py --start 1 --end 3 --concurrent 3
+python scripts/2b_extract_terminology.py --start 1 --end 3 --concurrent 2
 ```
 
 ---

@@ -4,6 +4,7 @@ import json
 import re
 import asyncio
 import random
+import argparse
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -371,13 +372,20 @@ Please provide a high-quality English translation:"""
         self.save_final_analytics()
 
 def main():
+    parser = argparse.ArgumentParser(description="Step 1: Baseline Translation Pipeline")
+    parser.add_argument("--start", type=int, default=1, help="Start chapter number")
+    parser.add_argument("--end", type=int, default=3, help="End chapter number")
+    parser.add_argument("--concurrent", type=int, default=10, help="Max concurrent requests")
+    
+    args = parser.parse_args()
+    
     config = PipelineConfig(
-        start_chapter=1,
-        end_chapter=3,
+        start_chapter=args.start,
+        end_chapter=args.end,
         model="deepseek-chat",
         temperature=1.3,
         max_tokens=8192,
-        max_concurrent=10,
+        max_concurrent=args.concurrent,
         max_retries=3,
         base_retry_delay=2.0
     )
