@@ -7,7 +7,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 def run_command(cmd, step_name, cwd=None):
-    """Run a command and handle errors"""
     print(f"\n{'='*60}")
     print(f"STEP: {step_name}")
     print(f"COMMAND: {' '.join(cmd)}")
@@ -38,7 +37,6 @@ def run_command(cmd, step_name, cwd=None):
         return False
 
 def check_environment():
-    """Check required environment variables"""
     # Load .env file from project root
     env_path = Path(__file__).parent.parent / ".env"
     if env_path.exists():
@@ -65,7 +63,6 @@ def check_environment():
     return True
 
 def check_files(start_chapter, end_chapter):
-    """Check if required input files exist"""
     base_path = Path("../data/chapters")
     
     # Check if base directories exist
@@ -102,8 +99,6 @@ def check_files(start_chapter, end_chapter):
     return True
 
 def run_full_pipeline(start_chapter, end_chapter, concurrent=3):
-    """Run the complete translation pipeline"""
-    
     print("Translation Pipeline Runner")
     print(f"Chapters: {start_chapter}-{end_chapter}")
     print(f"Concurrent requests: {concurrent}")

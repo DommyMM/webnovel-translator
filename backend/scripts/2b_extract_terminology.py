@@ -83,9 +83,9 @@ class SmartTerminologyExtractor:
             if lines[0].startswith("Chapter"):
                 ground_truth = '\n'.join(lines[3:]).strip()
         
-        return chinese_text, enhanced_text, ground_truth
+        return chinese_text, baseline_text, ground_truth
     
-    def create_terminology_extraction_prompt(self, chinese_text: str, enhanced_text: str, ground_truth: str) -> str:
+    def create_terminology_extraction_prompt(self, chinese_text: str, baseline_text: str, ground_truth: str) -> str:
         prompt = f"""You are an expert in Chinese cultivation novels. Compare these two English translations and extract terminology differences where they use different words for the same Chinese concepts.
     
 IMPORTANT: Do not include any thinking process, reasoning, or analysis in your response. Give only the final output.
@@ -93,8 +93,8 @@ IMPORTANT: Do not include any thinking process, reasoning, or analysis in your r
 CHINESE ORIGINAL (for context):
 {chinese_text}
 
-MY TRANSLATION:
-{enhanced_text}
+BASELINE TRANSLATION:
+{baseline_text}
 
 PROFESSIONAL REFERENCE (prefer this terminology):
 {ground_truth}
@@ -134,8 +134,8 @@ Extract the most important terminology differences:"""
         
         return prompt
     
-    async def extract_terminology_async(self, chinese_text: str, enhanced_text: str, ground_truth: str) -> List[Dict]:
-        prompt = self.create_terminology_extraction_prompt(chinese_text, enhanced_text, ground_truth)
+    async def extract_terminology_async(self, chinese_text: str, baseline_text: str, ground_truth: str) -> List[Dict]:
+        prompt = self.create_terminology_extraction_prompt(chinese_text, baseline_text, ground_truth)
         
         try:
             print(f"Chapter {self.chapter_num}: Analyzing terminology differences...")
@@ -286,11 +286,11 @@ Extract the most important terminology differences:"""
             
             try:
                 # Load all three texts
-                chinese_text, enhanced_text, ground_truth = self.load_translations()
+                chinese_text, baseline_text, ground_truth = self.load_translations()
                 print(f"Chapter {self.chapter_num}: Loaded translations")
                 
                 # Extract terminology differences
-                terminology_entries = await self.extract_terminology_async(chinese_text, enhanced_text, ground_truth)
+                terminology_entries = await self.extract_terminology_async(chinese_text, baseline_text, ground_truth)
                 
                 # Save individual chapter results
                 chapter_file = Path(self.config.output_dir) / f"chapter_{self.chapter_num:04d}_terminology.json"
