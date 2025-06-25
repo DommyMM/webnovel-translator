@@ -53,9 +53,9 @@ class ParallelDeepSeekPipeline:
         self.metrics: List[ChapterMetrics] = []
         
     def setup_directories(self):
-        Path(self.config.output_dir).mkdir(exist_ok=True)
+        Path(self.config.output_dir).mkdir(exist_ok=True, parents=True)
         for subdir in ["translations", "comparisons", "analytics"]:
-            Path(self.config.output_dir, subdir).mkdir(exist_ok=True)
+            Path(self.config.output_dir, subdir).mkdir(exist_ok=True, parents=True)
     
     def load_chapter_files(self, chapter_num: int) -> tuple[str, str]:
         cn_file = Path(self.config.chinese_chapters_dir) / f"chapter_{chapter_num:04d}_cn.txt"
