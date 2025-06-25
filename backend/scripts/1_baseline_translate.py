@@ -115,8 +115,12 @@ Please provide a high-quality English translation:"""
                     total=estimated_total_tokens,
                     desc=f"Chapter {chapter_num}",
                     unit="tok",
-                    position=chapter_num - self.config.start_chapter,  # Fixed positioning
-                    leave=True
+                    unit_scale=True,
+                    position=chapter_num - self.config.start_chapter,
+                    leave=True,
+                    colour='blue',
+                    smoothing=0.1,
+                    bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]"
                 ) as pbar:
                     
                     # Enable streaming

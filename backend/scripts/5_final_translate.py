@@ -326,9 +326,13 @@ Terminology count: {len(terminology)}
             with tqdm(
                 total=estimated_total_tokens,
                 desc=f"Chapter {self.chapter_num}",
-                unit="tok",
-                position=self.chapter_num - self.start_chapter,  # Fixed positioning
-                leave=True
+                unit="tok", 
+                unit_scale=True,
+                position=self.chapter_num - self.start_chapter,
+                leave=True,
+                colour='green',
+                smoothing=0.1,
+                bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]"
             ) as pbar:
                 
                 # Enable streaming
