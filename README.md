@@ -199,8 +199,8 @@ terminology = {doc: metadata['english_term'] for doc, metadata, distance in resu
 ## Tech Stack
 
 ### **APIs & Models**
-- **DeepSeek V3**: Primary translation engine (baseline, enhanced, final)
-- **Cerebras Qwen-3-32B**: Rule extraction and cleaning
+- **DeepSeek V3**: Translation engine + rule extraction + evaluation
+- **Cerebras Qwen-3-32B**: Rule cleaning + terminology extraction
 - **ChromaDB**: Vector database for terminology RAG
 - **BGE-M3 Embeddings**: Multilingual embeddings for semantic search (default)
 - **Qwen3-8B Embeddings**: Chinese-specialized embeddings (optional)

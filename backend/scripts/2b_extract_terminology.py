@@ -99,7 +99,7 @@ BASELINE TRANSLATION:
 PROFESSIONAL REFERENCE (prefer this terminology):
 {ground_truth}
 
-Your task: Find terminology differences where MY TRANSLATION and PROFESSIONAL REFERENCE use different English words for the same Chinese concepts. Focus on names, cultivation terms, titles, techniques, and key concepts.
+Your task: Find terminology differences where BASELINE TRANSLATION and PROFESSIONAL REFERENCE use different English words for the same Chinese concepts. Focus on names, cultivation terms, titles, techniques, and key concepts.
 
 **What to extract:**
 - Character names (e.g., different romanizations)
