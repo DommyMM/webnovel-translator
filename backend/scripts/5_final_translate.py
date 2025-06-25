@@ -12,6 +12,7 @@ from chromadb.utils.embedding_functions import EmbeddingFunction
 from sentence_transformers import SentenceTransformer
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
+from tqdm.asyncio import tqdm
 
 load_dotenv()
 
@@ -211,11 +212,12 @@ class ChromaRAGQuerySystem:
         return unit_terminology
 
 class AsyncFinalTranslator:
-    def __init__(self, chapter_num: int, rules: List[str], shared_rag=None, debug=False, dry_run=False):
+    def __init__(self, chapter_num: int, rules: List[str], shared_rag=None, debug=False, dry_run=False, start_chapter=1):
         self.chapter_num = chapter_num
         self.rules = rules
         self.debug = debug
         self.dry_run = dry_run
+        self.start_chapter = start_chapter  # Added for progress bar positioning
         
         # File paths
         self.chinese_file = f"../data/chapters/clean/chapter_{chapter_num:04d}_cn.txt"
@@ -317,17 +319,51 @@ Terminology count: {len(terminology)}
             return f"[DRY RUN] Prompt constructed successfully for Chapter {self.chapter_num}"
 
         try:
-            response = await self.client.chat.completions.create(
-                model="deepseek-chat",
-                messages=[
-                    {"role": "system", "content": system_message},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=1.3,
-                max_tokens=8192,
-            )
+            # Estimate tokens for progress bar
+            estimated_total_tokens = int(len(chinese_text) * 1.31)
             
-            return response.choices[0].message.content.strip()
+            # Initialize progress bar for this chapter (fixed positioning)
+            with tqdm(
+                total=estimated_total_tokens,
+                desc=f"Chapter {self.chapter_num}",
+                unit="tok",
+                position=self.chapter_num - self.start_chapter,  # Fixed positioning
+                leave=True
+            ) as pbar:
+                
+                # Enable streaming
+                response = await self.client.chat.completions.create(
+                    model="deepseek-chat",
+                    messages=[
+                        {"role": "system", "content": system_message},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    temperature=1.3,
+                    max_tokens=8192,
+                    stream=True
+                )
+                
+                # Accumulate translation with live progress
+                translation = ""
+                tokens_received = 0
+                
+                async for chunk in response:
+                    if chunk.choices[0].delta.content:
+                        new_content = chunk.choices[0].delta.content
+                        translation += new_content
+                        
+                        # Count tokens (rough: words + punctuation)
+                        new_tokens = len(new_content.split()) + new_content.count(',') + new_content.count('.')
+                        tokens_received += new_tokens
+                        
+                        # Update progress bar
+                        pbar.update(new_tokens)
+                
+                # Ensure progress bar reaches 100%
+                if tokens_received < estimated_total_tokens:
+                    pbar.update(estimated_total_tokens - tokens_received)
+            
+            return translation.strip()
             
         except Exception as e:
             print(f"Translation error: {e}")
@@ -431,7 +467,14 @@ async def translate_chapters_with_rag(start_chapter: int, end_chapter: int, max_
     # Create translators for each chapter
     translators = []
     for chapter_num in range(start_chapter, end_chapter + 1):
-        translator = AsyncFinalTranslator(chapter_num, rules, shared_rag=shared_rag, debug=debug, dry_run=dry_run)
+        translator = AsyncFinalTranslator(
+            chapter_num, 
+            rules, 
+            shared_rag=shared_rag, 
+            debug=debug, 
+            dry_run=dry_run,
+            start_chapter=start_chapter  # Pass start_chapter for progress bar positioning
+        )
         translators.append(translator)
     
     # Process chapters concurrently

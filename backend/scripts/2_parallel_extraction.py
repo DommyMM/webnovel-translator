@@ -42,9 +42,9 @@ async def run_parallel_extraction(start_chapter, end_chapter, concurrent=3):
     start_time = time.time()
     
     # Run both extractions in parallel
-    print("🚀 Starting parallel extraction...")
-    print("  📝 2a: Rule extraction (baseline vs professional)")
-    print("  📚 2b: Terminology extraction (baseline vs professional)")
+    print("Starting parallel extraction...")
+    print("  2a: Rule extraction (baseline vs professional)")
+    print("  2b: Terminology extraction (baseline vs professional)")
     print()
     
     tasks = [
@@ -67,30 +67,30 @@ async def run_parallel_extraction(start_chapter, end_chapter, concurrent=3):
     
     for result in results:
         if isinstance(result, Exception):
-            print(f"❌ Exception occurred: {result}")
+            print(f"Exception occurred: {result}")
             continue
             
         script = result["script"]
         returncode = result["returncode"]
         
         if returncode == 0:
-            print(f"✅ {script}: SUCCESS")
+            print(f"{script}: SUCCESS")
             success_count += 1
         else:
-            print(f"❌ {script}: FAILED (exit code {returncode})")
+            print(f"{script}: FAILED (exit code {returncode})")
             if result["stderr"]:
                 print(f"   Error: {result['stderr'][:200]}...")
     
-    print(f"\n⏱️  Total time: {minutes}m {seconds}s")
-    print(f"📊 Success rate: {success_count}/2 scripts")
+    print(f"\nTotal time: {minutes}m {seconds}s")
+    print(f"Success rate: {success_count}/2 scripts")
     
     if success_count == 2:
-        print("\n🎉 All extractions completed successfully!")
-        print("📋 Next steps:")
+        print("\nAll extractions completed successfully.")
+        print("Next steps:")
         print("   python 3_parallel_cleaning.py")
         return True
     else:
-        print("\n❌ Some extractions failed. Check logs above.")
+        print("\nSome extractions failed. Check logs above.")
         return False
 
 def main():

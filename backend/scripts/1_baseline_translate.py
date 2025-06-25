@@ -11,6 +11,7 @@ from typing import Dict, List, Optional
 from dataclasses import dataclass, asdict
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
+from tqdm.asyncio import tqdm
 
 load_dotenv()
 
@@ -99,7 +100,6 @@ Please provide a high-quality English translation:"""
         return prompt.format(chinese_text=chinese_text)
     
     async def translate_chapter_async(self, chinese_text: str, chapter_num: int) -> tuple[str, Dict]:
-        """Translate chapter with exponential backoff retry mechanism"""
         prompt = self.create_translation_prompt(chinese_text)
         retry_count = 0
         
@@ -107,32 +107,66 @@ Please provide a high-quality English translation:"""
             start_time = time.time()
             
             try:
-                response = await self.client.chat.completions.create(
-                    model=self.config.model,
-                    messages=[
-                        {"role": "system", "content": "You are an expert translator specializing in Chinese cultivation novels."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=self.config.temperature,
-                    max_tokens=self.config.max_tokens
-                )
+                # Estimate tokens for progress bar using our actual API ratio
+                estimated_total_tokens = int(len(chinese_text) * 1.31)
                 
-                translation = response.choices[0].message.content
+                # Initialize progress bar for this chapter (fix positioning for any start chapter)
+                with tqdm(
+                    total=estimated_total_tokens,
+                    desc=f"Chapter {chapter_num}",
+                    unit="tok",
+                    position=chapter_num - self.config.start_chapter,  # Fixed positioning
+                    leave=True
+                ) as pbar:
+                    
+                    # Enable streaming
+                    response = await self.client.chat.completions.create(
+                        model=self.config.model,
+                        messages=[
+                            {"role": "system", "content": "You are an expert translator specializing in Chinese cultivation novels."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        temperature=self.config.temperature,
+                        max_tokens=self.config.max_tokens,
+                        stream=True
+                    )
+                    
+                    # Accumulate translation with live progress
+                    translation = ""
+                    tokens_received = 0
+                    
+                    async for chunk in response:
+                        if chunk.choices[0].delta.content:
+                            new_content = chunk.choices[0].delta.content
+                            translation += new_content
+                            
+                            # Count tokens (rough: words + punctuation)
+                            new_tokens = len(new_content.split()) + new_content.count(',') + new_content.count('.')
+                            tokens_received += new_tokens
+                            
+                            # Update progress bar
+                            pbar.update(new_tokens)
+                    
+                    # Ensure progress bar reaches 100%
+                    if tokens_received < estimated_total_tokens:
+                        pbar.update(estimated_total_tokens - tokens_received)
                 
-                # Clean up reasoning tags or code blocks that might appear
+                # Clean up translation (same as before)
                 translation = re.sub(r'<think>.*?</think>', '', translation, flags=re.DOTALL).strip()
                 translation = re.sub(r'^```.*?```$', '', translation, flags=re.DOTALL | re.MULTILINE).strip()
                 
                 translation_time = time.time() - start_time
-                total_tokens = response.usage.total_tokens
+                
+                # Mock token usage (since streaming doesn't return usage)
+                total_tokens = max(tokens_received, estimated_total_tokens)
                 tokens_per_second = total_tokens / translation_time if translation_time > 0 else 0
                 
                 performance_stats = {
                     "translation_time": translation_time,
                     "total_tokens": total_tokens,
                     "tokens_per_second": tokens_per_second,
-                    "prompt_tokens": response.usage.prompt_tokens,
-                    "completion_tokens": response.usage.completion_tokens,
+                    "prompt_tokens": int(len(chinese_text) * 0.6),
+                    "completion_tokens": int(len(translation.split()) * 1.3),
                     "retry_count": retry_count
                 }
                 
