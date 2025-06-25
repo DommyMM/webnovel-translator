@@ -112,7 +112,7 @@ python scripts/scrape/clean.py
 ### 2. Baseline Translation
 ```bash
 # Translate with DeepSeek API (concurrent processing)
-python scripts/1_baseline_translate.py
+python scripts/1_baseline_translate.py --start 1 --end 3 --concurrent 10
 ```
 
 ### 3. Parallel Extraction (Rules + Terminology)
@@ -237,9 +237,12 @@ Improvements:
 
 ### System Performance
 - **Speed**: ~90s per chapter (Rules + RAG), ~30s baseline
+- **Real-time Progress**: Live token streaming with multi-chapter progress bars
 - **Terminology**: BGE-M3 semantic search with 0.15 threshold captures context-diluted terms
 - **Scalability**: Async processing handles 10+ chapters concurrently
 - **Cost**: ~$0.004 per chapter with DeepSeek API
+
+The **tqdm streaming progress** provides live feedback during translation, showing token processing rates and estimated completion times for better user experience during concurrent chapter processing.
 
 ### RAG Breakthrough Example
 ```

@@ -12,7 +12,7 @@ Technical reference for streamlined translation pipeline scripts.
 
 ### 1. `1_baseline_translate.py`
 ```bash
-python 1_baseline_translate.py
+python 1_baseline_translate.py --start 1 --end 3 --concurrent 10
 ```
 **Function**: Baseline translation (DeepSeek API)  
 **Config**: Hardcoded in script (edit to change range/concurrency)  
@@ -97,28 +97,23 @@ python 6_evaluate.py [standard args]
 
 ## Processing Summary
 
-| Step | Script | Type | Args | Model | Embeddings |
-|------|--------|------|------|-------|------------|
-| 1 | `1_baseline_translate.py` | Async | Hardcoded | DeepSeek | - |
-| 2a | `2a_extract_rules.py` | Async | Standard | DeepSeek | - |
-| 2b | `2b_extract_terminology.py` | Async | Standard | Cerebras | - |
-| 3 | `3_clean_rules.py` | Sequential | None | Cerebras | - |
-| 4 | `4_build_chromadb.py` | Sequential | Embedding flags | - | BGE-M3/Qwen3/MPNet |
-| 5 | `5_final_translate.py` | Async | Standard + special | DeepSeek | BGE-M3/Qwen3/MPNet |
-| 6 | `6_evaluate.py` | Async | Standard | DeepSeek | - |
+| Step | Script | Type | Args | Model | Features |
+|------|--------|------|------|-------|----------|
+| 1 | `1_baseline_translate.py` | Async | Standard | deepseek-chat | tqdm progress |
+| 2a | `2a_extract_rules.py` | Async | Standard | deepseek-reasoner | - |
+| 5 | `5_final_translate.py` | Async | Standard + special | deepseek-chat | tqdm progress, RAG |
 
 ## Quick Start Commands
 
 ### Full Streamlined Pipeline
 ```bash
 # Run complete pipeline (all steps)
-python 1_baseline_translate.py                           # Edit config in script
-python 2_parallel_extraction.py --start 1 --end 3       # Steps 2a + 2b in parallel
-python 3_clean_rules.py                                  # Step 3
-python 4_build_chromadb.py                              # Step 4 (uses BGE-M3 by default)
-python 5_final_translate.py --start 1 --end 3           # Step 5 (uses BGE-M3 by default)
-python 6_evaluate.py --start 1 --end 3                  # Step 6 (optional)
-```
+python 1_baseline_translate.py --start 1 --end 3 --concurrent 10    # Step 1
+python 2_parallel_extraction.py --start 1 --end 3                   # Steps 2a + 2b in parallel
+python 3_clean_rules.py --start 1 --end 3                           # Step 3
+python 4_build_chromadb.py --start 1 --end 3                        # Step 4 (uses BGE-M3 by default)
+python 5_final_translate.py --start 1 --end 3                       # Step 5 (uses BGE-M3 by default)
+python 6_evaluate.py --start 1 --end 3                              # Step 6 (optional)
 
 ### Individual Steps
 ```bash
