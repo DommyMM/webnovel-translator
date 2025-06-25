@@ -27,7 +27,7 @@ class TerminologyEntry:
 
 @dataclass
 class TerminologyConfig:
-    enhanced_results_dir: str = "../results/enhanced"  # Your enhanced translations
+    baseline_results_dir: str = "../results/baseline"  # Use baseline translations
     ground_truth_dir: str = "../data/chapters/ground_truth"
     chinese_chapters_dir: str = "../data/chapters/clean"  # For context
     terminology_db_file: str = "../data/terminology/extracted_terminology.json"
@@ -59,17 +59,17 @@ class SmartTerminologyExtractor:
         with open(chinese_file, 'r', encoding='utf-8') as f:
             chinese_text = f.read().strip()
         
-        # Load enhanced translation (your current best)
-        enhanced_file = Path(self.config.enhanced_results_dir, "translations", f"chapter_{self.chapter_num:04d}_enhanced.txt")
-        if not enhanced_file.exists():
-            raise FileNotFoundError(f"Enhanced translation not found: {enhanced_file}")
+        # Load BASELINE translation (was enhanced)
+        baseline_file = Path(self.config.baseline_results_dir, "translations", f"chapter_{self.chapter_num:04d}_deepseek.txt")
+        if not baseline_file.exists():
+            raise FileNotFoundError(f"Baseline translation not found: {baseline_file}")
         
-        with open(enhanced_file, 'r', encoding='utf-8') as f:
-            enhanced_text = f.read().strip()
+        with open(baseline_file, 'r', encoding='utf-8') as f:
+            baseline_text = f.read().strip()
             # Remove header if present
-            if enhanced_text.startswith("Enhanced Translation"):
-                lines = enhanced_text.split('\n')
-                enhanced_text = '\n'.join(lines[3:]).strip()
+            if baseline_text.startswith("DeepSeek Translation"):
+                lines = baseline_text.split('\n')
+                baseline_text = '\n'.join(lines[2:]).strip()
         
         # Load professional ground truth
         truth_file = Path(self.config.ground_truth_dir) / f"chapter_{self.chapter_num:04d}_en.txt"
@@ -473,7 +473,7 @@ def main():
     
     # Check if required directories exist
     required_dirs = [
-        config.enhanced_results_dir,
+        config.baseline_results_dir,
         config.ground_truth_dir,
         config.chinese_chapters_dir
     ]
@@ -511,7 +511,7 @@ def main():
         print(f"  Temperature: {config.temperature}")
         print(f"  Max concurrent: {config.max_concurrent}")
         print(f"  Chapters: {config.start_chapter}-{config.end_chapter}")
-        print(f"  Enhanced results: {config.enhanced_results_dir}")
+        print(f"  Baseline results: {config.baseline_results_dir}")
         print(f"  Ground truth: {config.ground_truth_dir}")
         print(f"  Output: {config.terminology_db_file}")
         

@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""
-Full Translation Pipeline Runner
-Executes steps 1-7 sequentially with proper error handling.
-"""
-
 import os
 import sys
 import subprocess
@@ -133,28 +127,24 @@ def run_full_pipeline(start_chapter, end_chapter, concurrent=3):
             "note": "⚠ Uses hardcoded config - edit script if needed"
         },
         {
-            "name": "Step 2: Extract Rules", 
-            "cmd": ["python", "2_extract_rules.py", "--start", str(start_chapter), "--end", str(end_chapter), "--concurrent", str(concurrent)]
+            "name": "Step 2: Parallel Extraction (Rules + Terminology)", 
+            "cmd": ["python", "2_parallel_extraction.py", "--start", str(start_chapter), "--end", str(end_chapter), "--concurrent", str(concurrent)]
         },
         {
-            "name": "Step 3: Clean Rules",
-            "cmd": ["python", "3_clean_rules.py"]
+            "name": "Step 3: Parallel Cleaning (Rules)",
+            "cmd": ["python", "3_parallel_cleaning.py"]
         },
         {
-            "name": "Step 4: Enhanced Translation",
-            "cmd": ["python", "4_enhanced_translate.py", "--start", str(start_chapter), "--end", str(end_chapter), "--concurrent", str(concurrent)]
+            "name": "Step 4: Build ChromaDB",
+            "cmd": ["python", "4_build_chromadb.py"]
         },
         {
-            "name": "Step 5: Extract Terminology", 
-            "cmd": ["python", "5_extract_terminology.py", "--start", str(start_chapter), "--end", str(end_chapter), "--concurrent", str(concurrent)]
+            "name": "Step 5: Final Translation (Rules + RAG)",
+            "cmd": ["python", "5_final_translate.py", "--start", str(start_chapter), "--end", str(end_chapter), "--concurrent", str(concurrent)]
         },
         {
-            "name": "Step 6: Clean Terminology",
-            "cmd": ["python", "6_clean_terms.py"]
-        },
-        {
-            "name": "Step 7: Final Translation",
-            "cmd": ["python", "7_final_translate.py", "--start", str(start_chapter), "--end", str(end_chapter), "--concurrent", str(concurrent)]
+            "name": "Step 6: Evaluation",
+            "cmd": ["python", "6_evaluate.py", "--start", str(start_chapter), "--end", str(end_chapter), "--concurrent", str(concurrent)]
         }
     ]
     
@@ -169,7 +159,7 @@ def run_full_pipeline(start_chapter, end_chapter, concurrent=3):
         if "note" in step:
             print(f"\n{step['note']}")
         
-        success = run_command(step["cmd"], f"{i}/7 - {step['name']}", cwd=".")
+        success = run_command(step["cmd"], f"{i}/6 - {step['name']}", cwd=".")
         
         if not success:
             print(f"\n✗ Pipeline failed at step {i}")
@@ -184,20 +174,19 @@ def run_full_pipeline(start_chapter, end_chapter, concurrent=3):
     print(f"\n{'='*60}")
     print("PIPELINE COMPLETE")
     print('='*60)
-    print(f"✓ All 7 steps completed successfully")
+    print(f"✓ All 6 steps completed successfully")
     print(f"✓ Total time: {minutes}m {seconds}s")
     print(f"✓ Chapters processed: {start_chapter}-{end_chapter}")
     print(f"\nResults available in:")
     print(f"  - ../results/baseline/translations/")
-    print(f"  - ../results/enhanced/translations/") 
     print(f"  - ../results/final/translations/")
-    print(f"\nRun evaluation:")
-    print(f"  python 8_evaluate.py --start {start_chapter} --end {end_chapter}")
+    print(f"\nEvaluation completed automatically in step 6")
+    print(f"Check: ../results/evaluation/reports/evaluation_report.txt")
     
     return True
 
 def main():
-    parser = argparse.ArgumentParser(description="Run complete translation pipeline (steps 1-7)")
+    parser = argparse.ArgumentParser(description="Run complete translation pipeline")
     parser.add_argument("--start", type=int, default=1, help="Start chapter number")
     parser.add_argument("--end", type=int, default=3, help="End chapter number") 
     parser.add_argument("--concurrent", type=int, default=3, help="Max concurrent requests")

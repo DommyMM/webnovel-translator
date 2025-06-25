@@ -20,21 +20,34 @@ python 1_baseline_translate.py
 
 ---
 
-### 2. `2_extract_rules.py`
+### 2. `2_parallel_extraction.py`
 ```bash
-python 2_extract_rules.py [standard args]
+python 2_parallel_extraction.py [standard args]
 ```
+**Function**: Runs 2a + 2b in parallel  
+**Scripts**: `2a_extract_rules.py` + `2b_extract_terminology.py`
+
+#### 2a. `2a_extract_rules.py`
 **Function**: Extract translation rules via AI comparison  
 **Model**: DeepSeek V3 | **Processing**: Async  
 **Input**: Baseline translations + ground truth  
 **Output**: `../data/rules/extracted_raw.json`
 
+#### 2b. `2b_extract_terminology.py`
+**Function**: Extract terminology differences via AI comparison  
+**Model**: Cerebras Qwen-3-32B | **Processing**: Async  
+**Input**: Baseline translations + ground truth
+**Output**: `../data/terminology/extracted_terminology.json`
+
 ---
 
-### 3. `3_clean_rules.py`
+### 3. `3_parallel_cleaning.py`
 ```bash
-python 3_clean_rules.py
+python 3_parallel_cleaning.py
 ```
+**Function**: Runs 3a in parallel
+
+#### 3a. `3a_clean_rules.py`
 **Function**: Clean/filter extracted rules  
 **Model**: Cerebras Qwen-3-32B | **Processing**: Sequential  
 **Input**: `../data/rules/extracted_raw.json`  
@@ -42,31 +55,9 @@ python 3_clean_rules.py
 
 ---
 
-### 4. `4_enhanced_translate.py`
+### 4. `4_build_chromadb.py`
 ```bash
-python 4_enhanced_translate.py [standard args]
-```
-**Function**: Translate with learned rules only  
-**Same as step 2**: Model, processing, chapter inputs  
-**Input**: + `../data/rules/cleaned.json`  
-**Output**: `../results/enhanced/translations/`
-
----
-
-### 5. `5_extract_terminology.py`
-```bash
-python 5_extract_terminology.py [standard args]
-```
-**Function**: Extract terminology differences for RAG  
-**Model**: Cerebras Qwen-3-32B | **Processing**: Async  
-**Input**: Enhanced translations + ground truth  
-**Output**: `../data/terminology/extracted_terminology.json`
-
----
-
-### 6. `6_clean_terms.py`
-```bash
-python 6_clean_terms.py [--qwen] [--lite]
+python 4_build_chromadb.py [--bge|--qwen|--lite]
 ```
 **Function**: Build ChromaDB vector database  
 **Embeddings**: BGE-M3 (default) | Qwen3-8B | MPNet  
@@ -76,45 +67,59 @@ python 6_clean_terms.py [--qwen] [--lite]
 
 ---
 
-### 7. `7_final_translate.py`
+### 5. `5_final_translate.py`
 ```bash
-python 7_final_translate.py [standard args] [--test] [--qwen] [--lite] [--debug] [--dry-run]
+python 5_final_translate.py [standard args] [--test] [--qwen] [--lite] [--debug] [--dry-run]
 ```
-**Function**: Final translation with rules + RAG  
+**Function**: Final translation with rules + RAG terminology  
 **Model**: DeepSeek V3 | **Processing**: Async  
-**Embeddings**: BGE-M3 (default) | Qwen3-8B | MPNet  
-**Chunking**: Semantic units (lines → sentences)  
-**Threshold**: 0.15 similarity for term retrieval  
-**Input**: + Clean rules + ChromaDB  
-**Output**: `../results/final/translations/`  
-**Debug**: `../debug/prompts/` (with --debug or --dry-run)
+**Features**: Semantic chunking + BGE-M3 vector RAG  
+**Input**: Chinese chapters + rules + ChromaDB  
+**Output**: `../results/final/translations/`
+
+**Special Flags**:
+- `--test`: Test RAG system with sample queries
+- `--debug`: Save prompts to `../debug/prompts/`
+- `--dry-run`: Generate prompts without API calls
+- `--qwen`: Use Qwen3-8B embeddings ChromaDB
+- `--lite`: Use MPNet embeddings ChromaDB
 
 ---
 
-### 8. `8_evaluate.py`
+### 6. `6_evaluate.py`
 ```bash
-python 8_evaluate.py [standard args]
+python 6_evaluate.py [standard args]
 ```
-**Function**: Quality evaluation across all stages  
-**Same as step 2**: Model, processing  
-**Input**: Baseline + final + ground truth  
-**Output**: `../results/evaluation/`
+**Function**: AI-powered quality assessment  
+**Model**: DeepSeek V3 | **Processing**: Async  
+**Comparison**: Baseline vs Final vs Professional  
+**Output**: `../results/evaluation/reports/evaluation_report.txt`
 
-## Embedding Models
+---
 
-| Flag | Model | Use Case |
-|------|-------|----------|
-| Default | BGE-M3 | Best retrieval quality |
-| --qwen | Qwen3-8B | Chinese-specialized |
-| --lite | MPNet | Fast/basic embeddings |
+### `run_pipeline.py` (Updated)
+```bash  
+python run_pipeline.py [standard args]
+```
+---
 
-## Special Flags
+## Quick Start Commands
 
-**Step 7 Only**:
-- `--test`: Test RAG system without translation
-- `--debug`: Save full prompts to debug folder
-- `--dry-run`: Build prompts without API calls
+```bash
+# Run complete streamlined pipeline
+python run_streamlined_pipeline.py --start 1 --end 3
 
+# Or run individual parallel steps
+python 2_parallel_extraction.py --start 1 --end 3 --concurrent 3
+python 3_parallel_cleaning.py  
+python 4_build_chromadb.py
+python 5_final_translate.py --start 1 --end 3 --concurrent 3
+python 6_evaluate.py --start 1 --end 3 --concurrent 3
+
+# Test specific components
+python 5_final_translate.py --test           # Test RAG system
+python 5_final_translate.py --debug --dry-run --start 1 --end 1  # Debug prompts
+```
 ## Processing Summary
 
 | Script | Type | Args | Model | Embeddings |
