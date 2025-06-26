@@ -62,7 +62,7 @@ class Qwen3EmbeddingFunction(EmbeddingFunction):
         embeddings = self.model.encode(texts, convert_to_numpy=True)
         return embeddings.tolist()
 
-class IncrementalChromaTerminologyBuilder:
+class ChromaTerminologyBuilder:
     def __init__(self, use_qwen3=False, use_bge=True, qwen_model="Qwen/Qwen3-Embedding-8B"):
         self.input_file = "../data/terminology/extracted_terminology.json"
         self.use_qwen3 = use_qwen3
@@ -207,60 +207,70 @@ class IncrementalChromaTerminologyBuilder:
             "metadata": metadata,
             "terminology": clean_db
         }
-    
-    def generate_term_id(self, chinese_term: str) -> str:   # Generate consistent ID for a term using hash
+    def generate_term_id(self, chinese_term: str) -> str:  # Generate consistent ID for a term using hash
         return f"term_{hashlib.md5(chinese_term.encode('utf-8')).hexdigest()}"
     
-    def incremental_update_terminology(self, clean_data: Dict):
+    def update_vector_database(self, clean_data: Dict):
         terminology = clean_data["terminology"]
+        metadata = clean_data["metadata"]
         
-        print(f"Incrementally updating ChromaDB with {len(terminology)} terms...")
-        
-        # Track what we're doing for logging
+        print(f"Updating ChromaDB with {len(terminology)} terms...")
         existing_count = self.collection.count()
-        processed_count = 0
         
-        # Process each term with upsert (handles both new and existing terms)
+        # Prepare batch data
+        chinese_terms = []
+        metadatas = []
+        ids = []
+        
+        current_time = datetime.now().isoformat()
+        
         for chinese_term, data in terminology.items():
-            term_id = self.generate_term_id(chinese_term)
+            chinese_terms.append(chinese_term)
+            ids.append(self.generate_term_id(chinese_term))
             
-            # Log what we're adding/updating  
-            print(f"Processing: {chinese_term} → {data['english_term']}")
+            # Metadata for both initial and incremental
+            metadatas.append({
+                "english_term": data["english_term"],
+                "category": data["category"],
+                "frequency": data["frequency"],
+                "confidence": data["confidence"],
+                "chapters_seen": data["chapters_seen"],
+                "first_seen": data["first_seen"],
+                "last_seen": data["last_seen"],
+                "created_at": data.get("created_at", current_time),
+                "updated_at": current_time
+            })
             
-            # Upsert with consistent ID (overwrites if exists, adds if new)
-            self.collection.upsert(
-                documents=[chinese_term],
-                metadatas=[{
-                    "english_term": data["english_term"],
-                    "category": data["category"],
-                    "frequency": data["frequency"],
-                    "confidence": data["confidence"],
-                    "chapters_seen": data["chapters_seen"],
-                    "first_seen": data["first_seen"],
-                    "last_seen": data["last_seen"],
-                    "updated_at": datetime.now().isoformat()
-                }],
-                ids=[term_id]
-            )
-            processed_count += 1
+            # Progress logging every 50 terms
+            if len(chinese_terms) % 50 == 0:
+                print(f"Prepared {len(chinese_terms)}/{len(terminology)} terms...")
+        
+        # Single efficient batch upsert
+        print("Embedding and storing terms in ChromaDB...")
+        self.collection.upsert(
+            documents=chinese_terms,
+            metadatas=metadatas,
+            ids=ids
+        )
         
         new_count = self.collection.count()
         net_new_terms = new_count - existing_count
         
-        print("ChromaDB incremental update complete:")
-        print(f"   - Terms processed: {processed_count}")
+        print("ChromaDB update complete:")
+        print(f"   - Terms processed: {len(terminology)}")
         print(f"   - Terms before: {existing_count}")
         print(f"   - Terms after: {new_count}")
         print(f"   - Net new terms: {net_new_terms}")
-        print(f"   - Updated existing: {processed_count - net_new_terms}")
+        print(f"   - Updated existing: {len(terminology) - net_new_terms}")
         
         return {
             "database_path": self.db_path,
             "collection_name": self.collection.name,
             "total_terms": new_count,
-            "processed_terms": processed_count,
+            "processed_terms": len(terminology),
             "net_new_terms": net_new_terms,
-            "updated_terms": processed_count - net_new_terms,
+            "updated_terms": len(terminology) - net_new_terms,
+            "categories": metadata["categories"],
             "embedding_model": self.embedding_model_name
         }
     
@@ -319,24 +329,24 @@ class IncrementalChromaTerminologyBuilder:
         
         if existing_count == 0:
             print("No existing ChromaDB found - building initial database")
-            return self.build_initial_vector_database(clean_data)
         else:
             print(f"Existing ChromaDB found with {existing_count} terms - updating incrementally")
-            return self.incremental_update_terminology(clean_data)
+        
+        return self.update_vector_database(clean_data)
     
     def save_readable_summary(self, clean_data: Dict, db_info: Dict):
         terminology = clean_data["terminology"]
         metadata = clean_data["metadata"]
         
         with open(self.readable_file, 'w', encoding='utf-8') as f:
-            f.write("INCREMENTAL CHROMADB VECTOR TERMINOLOGY DATABASE\n")
+            f.write("CHROMADB VECTOR TERMINOLOGY DATABASE (BATCH OPTIMIZED)\n")
             f.write("=" * 60 + "\n\n")
             f.write(f"Database path: {db_info['database_path']}\n")
             f.write(f"Collection name: {db_info['collection_name']}\n")
             f.write(f"Embedding model: {db_info['embedding_model']}\n")
             f.write(f"Total terms: {db_info['total_terms']}\n")
             
-            # Show incremental update info if available
+            # Show update info
             if 'processed_terms' in db_info:
                 f.write(f"Terms processed this batch: {db_info['processed_terms']}\n")
                 f.write(f"Net new terms this batch: {db_info['net_new_terms']}\n")
@@ -346,7 +356,7 @@ class IncrementalChromaTerminologyBuilder:
             f.write(f"Average frequency: {metadata['avg_frequency']:.1f}\n")
             f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
             
-            # Show categories if available
+            # Show categories
             if 'categories' in db_info:
                 f.write("CATEGORIES:\n")
                 for category, count in sorted(db_info['categories'].items()):
@@ -404,7 +414,7 @@ class IncrementalChromaTerminologyBuilder:
 def main():
     import argparse
     
-    parser = argparse.ArgumentParser(description="Build/Update ChromaDB Vector Terminology Database Incrementally")
+    parser = argparse.ArgumentParser(description="Build/Update ChromaDB Vector Terminology Database with Batch Processing")
     parser.add_argument("--bge", action="store_true", help="Use BGE-M3 embeddings (default)")
     parser.add_argument("--qwen", action="store_true", help="Use Qwen3-8B embeddings instead of BGE-M3")
     parser.add_argument("--lite", action="store_true", help="Use basic MPNet embeddings")
@@ -412,8 +422,8 @@ def main():
     
     args = parser.parse_args()
     
-    print("Step 4: Building/Updating ChromaDB Vector Terminology Database (Incremental)")
-    print("=" * 70)
+    print("Step 4: Building/Updating ChromaDB Vector Terminology Database (Batch Optimized)")
+    print("=" * 75)
     
     # Configuration based on arguments
     if args.qwen:
@@ -429,7 +439,7 @@ def main():
         use_bge = True
         print("Using BGE-M3 embeddings (default)")
     
-    builder = IncrementalChromaTerminologyBuilder(
+    builder = ChromaTerminologyBuilder(
         use_qwen3=use_qwen3,
         use_bge=use_bge,
         qwen_model="Qwen/Qwen3-Embedding-8B"
@@ -471,9 +481,7 @@ def main():
         print(f"Database location: {builder.db_path}")
         print(f"Embedding model: {builder.embedding_model_name}")
         print(f"Total terms now: {db_info['total_terms']}")
-        
-        if 'net_new_terms' in db_info:
-            print(f"This batch: +{db_info['net_new_terms']} new terms, {db_info['updated_terms']} updated")
+        print(f"This batch: +{db_info['net_new_terms']} new terms, {db_info['updated_terms']} updated")
         
     except FileNotFoundError as e:
         print(f"Error: {e}")
