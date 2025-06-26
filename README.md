@@ -102,20 +102,21 @@ terminology_diffs = {
 
 ## Streamlined Workflow (6 Steps)
 
-### 1. Data Collection
+### 0. Data Collection
 ```bash
 # Scrape and process Chinese chapters
 python scripts/scrape/scrape.py
 python scripts/scrape/clean.py
 ```
+Or just use your own txt files in `data/chapters/clean/` and `data/chapters/ground_truth/`.
 
-### 2. Baseline Translation
+### 1. Baseline Translation
 ```bash
 # Translate with DeepSeek API (concurrent processing)
 python scripts/1_baseline_translate.py --start 1 --end 3 --concurrent 10
 ```
 
-### 3. Parallel Extraction (Rules + Terminology)
+### 2. Parallel Extraction (Rules + Terminology)
 ```bash
 # Extract both style rules AND terminology differences simultaneously
 python scripts/2_parallel_extraction.py --start 1 --end 10 --concurrent 3
@@ -125,13 +126,13 @@ python scripts/2_parallel_extraction.py --start 1 --end 10 --concurrent 3
 # python scripts/2b_extract_terminology.py --start 1 --end 10 --concurrent 2
 ```
 
-### 4. Rule Cleaning
+### 3. Rule Cleaning
 ```bash
 # Clean and filter rules with Cerebras AI
 python scripts/3_clean_rules.py
 ```
 
-### 5. Build Vector Database
+### 4. Build Vector Database
 ```bash
 # Build ChromaDB vector database (BGE-M3 by default)
 python scripts/4_build_chromadb.py
@@ -141,7 +142,7 @@ python scripts/4_build_chromadb.py
 # python scripts/4_build_chromadb.py --lite    # MPNet embeddings
 ```
 
-### 6. Final Translation (Rules + RAG)
+### 5. Final Translation (Rules + RAG)
 ```bash
 # Final translation with rules + RAG terminology (BGE-M3 by default)
 python scripts/5_final_translate.py --start 1 --end 10 --concurrent 3
@@ -153,7 +154,7 @@ python scripts/5_final_translate.py --test
 python scripts/5_final_translate.py --start 1 --end 1 --dry-run --debug
 ```
 
-### 7. Quality Evaluation (Optional)
+### 6. Quality Evaluation (Optional)
 ```bash
 # Comprehensive quality assessment
 python scripts/6_evaluate.py --start 1 --end 10 --concurrent 3
@@ -242,8 +243,6 @@ Improvements:
 - **Scalability**: Async processing handles 10+ chapters concurrently
 - **Cost**: ~$0.004 per chapter with DeepSeek API
 
-The **tqdm streaming progress** provides live feedback during translation, showing token processing rates and estimated completion times for better user experience during concurrent chapter processing.
-
 ### RAG Breakthrough Example
 ```
 Problematic Chinese: "我是傲视天下，睥睨九霄的绝世丹帝——龙尘？"
@@ -280,8 +279,8 @@ echo "DEEPSEEK_API_KEY=your_key_here" > .env
 echo "CEREBRAS_API_KEY=your_key_here" >> .env
 
 # 2. Run streamlined pipeline (chapters 1-3)
-python scripts/1_baseline_translate.py
-python scripts/2_parallel_extraction.py --start 1 --end 3 --concurrent 3    # NEW: Parallel!
+python scripts/1_baseline_translate.py --start 1 --end 3 --concurrent 10
+python scripts/2_parallel_extraction.py --start 1 --end 3 --concurrent 3
 python scripts/3_clean_rules.py
 python scripts/4_build_chromadb.py  # Uses BGE-M3 by default
 python scripts/5_final_translate.py --start 1 --end 3 --concurrent 3        # Uses BGE-M3

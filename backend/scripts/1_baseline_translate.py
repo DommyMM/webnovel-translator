@@ -170,7 +170,7 @@ Please provide a high-quality English translation:"""
                     "total_tokens": total_tokens,
                     "tokens_per_second": tokens_per_second,
                     "prompt_tokens": int(len(chinese_text) * 0.6),
-                    "completion_tokens": int(len(translation.split()) * 1.3),
+                    "completion_tokens": int(len(translation.split()) * 1.31),
                     "retry_count": retry_count
                 }
                 
