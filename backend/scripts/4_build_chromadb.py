@@ -207,6 +207,7 @@ class ChromaTerminologyBuilder:
             "metadata": metadata,
             "terminology": clean_db
         }
+    
     def generate_term_id(self, chinese_term: str) -> str:  # Generate consistent ID for a term using hash
         return f"term_{hashlib.md5(chinese_term.encode('utf-8')).hexdigest()}"
     
@@ -228,7 +229,7 @@ class ChromaTerminologyBuilder:
             chinese_terms.append(chinese_term)
             ids.append(self.generate_term_id(chinese_term))
             
-            # Metadata for both initial and incremental
+            # Consistent metadata for both initial and incremental
             metadatas.append({
                 "english_term": data["english_term"],
                 "category": data["category"],
@@ -274,63 +275,10 @@ class ChromaTerminologyBuilder:
             "embedding_model": self.embedding_model_name
         }
     
-    def build_initial_vector_database(self, clean_data: Dict):
-        terminology = clean_data["terminology"]
-        metadata = clean_data["metadata"]
-        
-        print(f"Building initial vector database with {len(terminology)} terms...")
-        
-        # Prepare data for ChromaDB with consistent IDs
-        chinese_terms = []
-        metadatas = []
-        ids = []
-        
-        for chinese_term, data in terminology.items():
-            chinese_terms.append(chinese_term)
-            
-            metadatas.append({
-                "english_term": data["english_term"],
-                "category": data["category"],
-                "frequency": data["frequency"],
-                "confidence": data["confidence"],
-                "chapters_seen": data["chapters_seen"],
-                "first_seen": data["first_seen"],
-                "last_seen": data["last_seen"],
-                "created_at": data["created_at"]
-            })
-            
-            # Use consistent hash-based IDs instead of sequential
-            ids.append(self.generate_term_id(chinese_term))
-        
-        # Add to ChromaDB
-        print("Embedding Chinese terms and storing in ChromaDB...")
-        self.collection.upsert(
-            documents=chinese_terms,
-            metadatas=metadatas,
-            ids=ids
-        )
-        
-        print("Initial vector database built successfully")
-        print(f"   - Total terms: {len(chinese_terms)}")
-        print(f"   - Embeddings: {len(chinese_terms)} Chinese terms")
-        print(f"   - Metadata: English translations + categories")
-        print(f"   - Auto-saved to: {self.db_path}")
-        
-        return {
-            "database_path": self.db_path,
-            "collection_name": self.collection.name,
-            "total_terms": len(chinese_terms),
-            "categories": metadata["categories"],
-            "embedding_model": metadata["embedding_model"]
-        }
-    
     def build_or_update_vector_database(self, clean_data: Dict):
         existing_count = self.collection.count()
-        
-        if existing_count == 0:
-            print("No existing ChromaDB found - building initial database")
-        else:
-            print(f"Existing ChromaDB found with {existing_count} terms - updating incrementally")
+        mode = "initial" if existing_count == 0 else "incremental"
+        print(f"Updating ChromaDB ({mode} mode, {existing_count} existing terms)")
         
         return self.update_vector_database(clean_data)
     
