@@ -407,8 +407,9 @@ Focus only on abstract stylistic and structural principles that will apply broad
                 return None
 
 class AsyncRuleLearningPipeline:
-    def __init__(self, config: LearningConfig):
+    def __init__(self, config: LearningConfig, rebuild: bool = False):
         self.config = config
+        self.rebuild = rebuild
         self.setup_directories()
         Path(self.config.rules_database_file).parent.mkdir(parents=True, exist_ok=True)
     
@@ -468,30 +469,55 @@ class AsyncRuleLearningPipeline:
         
         return results
     
+    def load_existing_rules_database(self) -> Dict:
+        if self.rebuild:
+            print("Rebuild flag: Starting fresh, ignoring existing rules")
+            return {"rules": [], "metadata": {}}
+        
+        if Path(self.config.rules_database_file).exists():
+            with open(self.config.rules_database_file, 'r', encoding='utf-8') as f:
+                existing = json.load(f)
+            print(f"Loaded {len(existing.get('rules', []))} existing rules for incremental learning")
+            return existing
+        else:
+            print("No existing rules found - starting fresh")
+            return {"rules": [], "metadata": {}}
+    
+    def get_chapters_from_rules(self, rules: List[Dict]) -> List[int]:
+        chapters = set()
+        for rule in rules:
+            # Extract chapter number from rule ID (format: rule_ch{num}_...)
+            rule_id = rule.get("id", "")
+            if "rule_ch" in rule_id:
+                try:
+                    chapter_part = rule_id.split("rule_ch")[1].split("_")[0]
+                    chapters.add(int(chapter_part))
+                except (IndexError, ValueError):
+                    pass
+        return sorted(list(chapters))
+
     def merge_all_results(self, results: Dict):        # Merge results from all chapters into final database
         
-        # Initialize merged database
+        # Load existing rules if they exist
+        existing_db = self.load_existing_rules_database()
+        
+        # Start with existing rules instead of empty list
         merged_database = {
-            "rules": [],
-            "metadata": {
-                "created_at": datetime.now().isoformat(),
-                "total_rules": 0,
-                "last_updated": datetime.now().isoformat(),
-                "extraction_method": "async",
-                "chapters_processed": len(results),
-                "max_concurrent": self.config.max_concurrent
-            }
+            "rules": existing_db.get("rules", []).copy(),  # Start with existing
+            "metadata": existing_db.get("metadata", {})
         }
         
         all_metrics = []
         
-        # Merge rules and metrics from all chapters
+        # Add new rules from current extraction
+        new_rules_count = 0
         for chapter_num in sorted(results.keys()):
             result = results[chapter_num]
             
             # Add high-confidence rules to merged database
             high_conf_rules = result.get("high_conf_rules", [])
             merged_database["rules"].extend(high_conf_rules)
+            new_rules_count += len(high_conf_rules)
             
             # Collect metrics
             all_metrics.append(result["metrics"])
@@ -501,8 +527,23 @@ class AsyncRuleLearningPipeline:
             with open(comparison_file, 'w', encoding='utf-8') as f:
                 json.dump(result, f, indent=2, ensure_ascii=False)
         
-        # Update metadata
-        merged_database["metadata"]["total_rules"] = len(merged_database["rules"])
+        # Calculate all chapters that have contributed to this rule database
+        all_contributing_chapters = self.get_chapters_from_rules(merged_database["rules"])
+        current_batch_chapters = list(range(self.config.start_chapter, self.config.end_chapter + 1))
+        
+        # Update metadata with incremental learning info
+        previous_update_count = existing_db.get("metadata", {}).get("incremental_update_count", 0)
+        merged_database["metadata"].update({
+            "total_rules": len(merged_database["rules"]),
+            "created_at": existing_db.get("metadata", {}).get("created_at", datetime.now().isoformat()),
+            "last_updated": datetime.now().isoformat(),
+            "extraction_method": "async_incremental",
+            "incremental_update_count": previous_update_count + 1,
+            "current_batch_chapters": current_batch_chapters,
+            "all_contributing_chapters": all_contributing_chapters,
+            "new_rules_this_batch": new_rules_count,
+            "max_concurrent": self.config.max_concurrent
+        })
         
         # Save merged rules database
         with open(self.config.rules_database_file, 'w', encoding='utf-8') as f:
@@ -517,7 +558,11 @@ class AsyncRuleLearningPipeline:
             for temp_file in temp_dir.glob("*.json"):
                 temp_file.unlink()
         
-        print(f"Merged {len(merged_database['rules'])} high-confidence rules from {len(results)} chapters")
+        print(f"Incremental merge complete:")
+        print(f"  Previous rules: {len(existing_db.get('rules', []))}")
+        print(f"  New rules added: {new_rules_count}")
+        print(f"  Total rules now: {len(merged_database['rules'])}")
+        print(f"  Chapters covered: {all_contributing_chapters}")
         print(f"Rules database saved to: {self.config.rules_database_file}")
     
     def save_analytics(self, merged_database: Dict, all_metrics: List):        # Save final analytics
@@ -551,11 +596,12 @@ class AsyncRuleLearningPipeline:
         print(f"Analytics saved to: {analytics_file}")
 
 def main():
-    parser = argparse.ArgumentParser(description="Async Rule Extraction Pipeline")
+    parser = argparse.ArgumentParser(description="Async Rule Extraction Pipeline with Incremental Learning")
     parser.add_argument("--chapter", type=int, help="Process single chapter (for individual extraction)")
     parser.add_argument("--start", type=int, default=1, help="Start chapter for async processing")
     parser.add_argument("--end", type=int, default=3, help="End chapter for async processing")
     parser.add_argument("--concurrent", type=int, default=3, help="Max concurrent requests")
+    parser.add_argument("--rebuild", action="store_true", help="Start fresh (ignore existing rules)")
     
     args = parser.parse_args()
     
@@ -595,15 +641,17 @@ def main():
         asyncio.run(single_chapter())
     else:
         # Async mode (process all chapters)
-        print("Async Rule Extraction Configuration:")
+        mode = "REBUILD" if args.rebuild else "INCREMENTAL"
+        print(f"Async Rule Extraction Configuration ({mode} MODE):")
         print(f"  DeepSeek results: {config.deepseek_results_dir}")
         print(f"  Ground truth: {config.ground_truth_dir}")
         print(f"  Chapters: {config.start_chapter}-{config.end_chapter}")
         print(f"  Min confidence: {config.min_confidence}")
         print(f"  Model: {config.model}")
         print(f"  Max concurrent: {config.max_concurrent}")
+        print(f"  Rebuild mode: {args.rebuild}")
         
-        pipeline = AsyncRuleLearningPipeline(config)
+        pipeline = AsyncRuleLearningPipeline(config, rebuild=args.rebuild)
         asyncio.run(pipeline.run_async_extraction())
 
 if __name__ == "__main__":
