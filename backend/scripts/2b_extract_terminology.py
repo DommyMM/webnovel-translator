@@ -313,13 +313,53 @@ Extract the most important terminology differences:"""
                 return None
 
 class SmartTerminologyPipeline:
-    def __init__(self, config: TerminologyConfig):
+    def __init__(self, config: TerminologyConfig, rebuild: bool = False):
         self.config = config
+        self.rebuild = rebuild
         self.setup_directories()
     
     def setup_directories(self):
         Path(self.config.output_dir).mkdir(exist_ok=True, parents=True)
         Path(self.config.raw_responses_dir).mkdir(exist_ok=True, parents=True)
+    
+    def load_existing_terminology_database(self) -> Dict:
+        if self.rebuild:
+            print("Rebuild flag: Starting fresh, ignoring existing terminology")
+            return {"terminology": {}, "metadata": {}}
+        
+        if Path(self.config.terminology_db_file).exists():
+            with open(self.config.terminology_db_file, 'r', encoding='utf-8') as f:
+                existing = json.load(f)
+            print(f"Loaded {len(existing.get('terminology', {}))} existing terms for incremental learning")
+            return existing
+        else:
+            print("No existing terminology found - starting fresh")
+            return {"terminology": {}, "metadata": {}}
+    
+    def resolve_terminology_conflict(self, existing: Dict, new: Dict) -> Dict:
+        # Prefer higher confidence
+        if new["confidence"] > existing["confidence"]:
+            print(f"  Conflict resolved: Using new term (higher confidence)")
+            return new
+        elif existing["confidence"] > new["confidence"]:
+            print(f"  Conflict resolved: Keeping existing term (higher confidence)")
+            return existing
+        
+        # If confidence is equal, prefer higher frequency
+        if new["frequency"] > existing["frequency"]:
+            print(f"  Conflict resolved: Using new term (higher frequency)")
+            return new
+        else:
+            print(f"  Conflict resolved: Keeping existing term (higher frequency)")
+            return existing
+    
+    def get_chapters_from_terminology(self, terminology: Dict) -> List[int]:
+        chapters = set()
+        for term_data in terminology.values():
+            chapters_seen = term_data.get("chapters_seen", [])
+            if isinstance(chapters_seen, list):
+                chapters.update(chapters_seen)
+        return sorted(list(chapters))
     
     async def run_async_terminology_extraction(self):
         print("Starting Smart Terminology Extraction Pipeline")
@@ -374,44 +414,82 @@ class SmartTerminologyPipeline:
         return all_terminology
     
     def merge_and_save_terminology(self, all_terminology: List[Dict]):
-        # Merge identical terms across chapters
-        merged_terms = {}
+        # Load existing terminology database
+        existing_db = self.load_existing_terminology_database()
+        existing_terminology = existing_db.get("terminology", {})
         
+        # Start with existing terminology
+        merged_terms = {}
+        conflicts_resolved = 0
+        new_terms_added = 0
+        
+        # First, add all existing terms
+        for chinese_term, term_data in existing_terminology.items():
+            merged_terms[chinese_term] = term_data
+        
+        # Process new terminology entries
         for entry in all_terminology:
             chinese_term = entry["chinese_term"]
             professional_term = entry["professional_term"]
             
-            # Create a key for merging (chinese + professional term)
-            key = f"{chinese_term}→{professional_term}"
-            
-            if key not in merged_terms:
-                merged_terms[key] = entry.copy()
+            # Create key for merging (chinese term)
+            if chinese_term in merged_terms:
+                # Conflict: same Chinese term, potentially different professional term
+                existing_professional = merged_terms[chinese_term]["professional_term"]
+                new_professional = professional_term
+                
+                if existing_professional != new_professional:
+                    print(f"  Conflict: {chinese_term} → existing: '{existing_professional}' vs new: '{new_professional}'")
+                    merged_terms[chinese_term] = self.resolve_terminology_conflict(
+                        merged_terms[chinese_term], 
+                        {
+                            "professional_term": professional_term,
+                            "category": entry["category"],
+                            "frequency": entry["frequency"],
+                            "confidence": entry["confidence"],
+                            "chapters_seen": entry["chapters_seen"],
+                            "created_at": entry["created_at"]
+                        }
+                    )
+                    conflicts_resolved += 1
+                else:
+                    # Same translation, just merge frequency and chapters
+                    merged_terms[chinese_term]["frequency"] += entry["frequency"]
+                    existing_chapters = set(merged_terms[chinese_term]["chapters_seen"])
+                    new_chapters = set(entry["chapters_seen"])
+                    merged_terms[chinese_term]["chapters_seen"] = sorted(list(existing_chapters | new_chapters))
             else:
-                # Merge frequency and chapters
-                merged_terms[key]["frequency"] += 1
-                merged_terms[key]["chapters_seen"].extend(entry["chapters_seen"])
-                merged_terms[key]["chapters_seen"] = sorted(list(set(merged_terms[key]["chapters_seen"])))
-        
-        # Convert to final database format
-        terminology_db = {
-            "metadata": {
-                "created_at": datetime.now().isoformat(),
-                "total_terms": len(merged_terms),
-                "chapters_processed": f"{self.config.start_chapter}-{self.config.end_chapter}",
-                "extraction_method": "ai_comparison",
-                "model_used": self.config.model
-            },
-            "terminology": {
-                entry["chinese_term"]: {
-                    "professional_term": entry["professional_term"],
+                # New term, add it
+                merged_terms[chinese_term] = {
+                    "professional_term": professional_term,
                     "category": entry["category"],
                     "frequency": entry["frequency"],
                     "confidence": entry["confidence"],
                     "chapters_seen": entry["chapters_seen"],
                     "created_at": entry["created_at"]
                 }
-                for entry in merged_terms.values()
-            }
+                new_terms_added += 1
+        
+        # Calculate all contributing chapters
+        all_contributing_chapters = self.get_chapters_from_terminology(merged_terms)
+        current_batch_chapters = list(range(self.config.start_chapter, self.config.end_chapter + 1))
+        
+        # Convert to final database format
+        previous_update_count = existing_db.get("metadata", {}).get("incremental_update_count", 0)
+        terminology_db = {
+            "metadata": {
+                "created_at": existing_db.get("metadata", {}).get("created_at", datetime.now().isoformat()),
+                "last_updated": datetime.now().isoformat(),
+                "total_terms": len(merged_terms),
+                "extraction_method": "ai_comparison_incremental",
+                "model_used": self.config.model,
+                "incremental_update_count": previous_update_count + 1,
+                "current_batch_chapters": current_batch_chapters,
+                "all_contributing_chapters": all_contributing_chapters,
+                "new_terms_this_batch": new_terms_added,
+                "conflicts_resolved_this_batch": conflicts_resolved
+            },
+            "terminology": merged_terms
         }
         
         # Save main database
@@ -424,7 +502,7 @@ class SmartTerminologyPipeline:
             f.write("SMART EXTRACTED TERMINOLOGY DATABASE\n")
             f.write("=" * 60 + "\n\n")
             f.write(f"Total terms: {len(merged_terms)}\n")
-            f.write(f"Chapters: {self.config.start_chapter}-{self.config.end_chapter}\n")
+            f.write(f"Chapters: {all_contributing_chapters}\n")
             f.write(f"Method: AI comparison with professional translations\n")
             f.write(f"Model: {self.config.model}\n")
             f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
@@ -432,30 +510,35 @@ class SmartTerminologyPipeline:
             # Group by category
             from collections import defaultdict
             by_category = defaultdict(list)
-            for entry in merged_terms.values():
-                by_category[entry["category"]].append(entry)
+            for chinese_term, term_data in merged_terms.items():
+                by_category[term_data["category"]].append((chinese_term, term_data))
             
             for category, entries in sorted(by_category.items()):
                 f.write(f"\n{category.upper()} ({len(entries)} terms):\n")
                 f.write("-" * 40 + "\n")
-                for entry in sorted(entries, key=lambda x: x["frequency"], reverse=True):
-                    f.write(f"{entry['chinese_term']:15} → {entry['professional_term']:25} (freq: {entry['frequency']}, chapters: {entry['chapters_seen']})\n")
+                for chinese_term, term_data in sorted(entries, key=lambda x: x[1]["frequency"], reverse=True):
+                    professional_term = term_data["professional_term"]
+                    frequency = term_data["frequency"]
+                    chapters_seen = term_data["chapters_seen"]
+                    chapters_str = f"{min(chapters_seen)}-{max(chapters_seen)}" if len(chapters_seen) > 1 else str(chapters_seen[0])
+                    f.write(f"{chinese_term:15} → {professional_term:25} (freq: {frequency}, chapters: {chapters_str})\n")
         
+        print(f"Incremental merge complete:")
+        print(f"  Previous terms: {len(existing_terminology)}")
+        print(f"  New terms added: {new_terms_added}")
+        print(f"  Conflicts resolved: {conflicts_resolved}")
+        print(f"  Total terms now: {len(merged_terms)}")
+        print(f"  Chapters covered: {all_contributing_chapters}")
         print(f"Terminology database saved to: {self.config.terminology_db_file}")
         print(f"Readable format saved to: {readable_file}")
-        
-        # Show key results
-        print(f"\nKEY TERMINOLOGY DIFFERENCES FOUND:")
-        print("=" * 60)
-        for i, entry in enumerate(list(merged_terms.values())[:10]):
-            print(f"{entry['chinese_term']} → {entry['professional_term']} (instead of {entry['my_translation_term']})")
 
 def main():
-    parser = argparse.ArgumentParser(description="Smart Terminology Extraction Pipeline")
+    parser = argparse.ArgumentParser(description="Smart Terminology Extraction Pipeline with Incremental Learning")
     parser.add_argument("--start", type=int, default=1, help="Start chapter")
     parser.add_argument("--end", type=int, default=3, help="End chapter")
     parser.add_argument("--chapter", type=int, help="Extract terminology from single chapter")
     parser.add_argument("--concurrent", type=int, default=2, help="Max concurrent requests")
+    parser.add_argument("--rebuild", action="store_true", help="Start fresh (ignore existing terminology)")
     
     args = parser.parse_args()
     
@@ -488,7 +571,7 @@ def main():
         for dir_path in missing_dirs:
             print(f"  - {dir_path}")
         print("\nPlease run the prerequisite steps:")
-        print("  1. python 4_enhanced_translate.py (for enhanced translations)")
+        print("  1. python 1_baseline_translate.py (for baseline translations)")
         return
     
     if args.chapter:
@@ -506,7 +589,8 @@ def main():
         asyncio.run(single_chapter())
     else:
         # Process all chapters
-        print("Smart Terminology Extraction Configuration:")
+        mode = "REBUILD" if args.rebuild else "INCREMENTAL"
+        print(f"Smart Terminology Extraction Configuration ({mode} MODE):")
         print(f"  Model: {config.model}")
         print(f"  Temperature: {config.temperature}")
         print(f"  Max concurrent: {config.max_concurrent}")
@@ -514,8 +598,9 @@ def main():
         print(f"  Baseline results: {config.baseline_results_dir}")
         print(f"  Ground truth: {config.ground_truth_dir}")
         print(f"  Output: {config.terminology_db_file}")
+        print(f"  Rebuild mode: {args.rebuild}")
         
-        pipeline = SmartTerminologyPipeline(config)
+        pipeline = SmartTerminologyPipeline(config, rebuild=args.rebuild)
         asyncio.run(pipeline.run_async_terminology_extraction())
 
 if __name__ == "__main__":
