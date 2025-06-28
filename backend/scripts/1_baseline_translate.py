@@ -144,8 +144,8 @@ Please provide a high-quality English translation:"""
                             new_content = chunk.choices[0].delta.content
                             translation += new_content
                             
-                            # Count tokens (rough: words + punctuation)
-                            new_tokens = len(new_content.split()) + new_content.count(',') + new_content.count('.')
+                            # Better token estimation: ~4 chars per token for English output
+                            new_tokens = len(new_content) / 4.0
                             tokens_received += new_tokens
                             
                             # Update progress bar
