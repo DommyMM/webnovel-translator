@@ -1,539 +1,208 @@
-import os
-import time
-import json
-import re
-import argparse
 import asyncio
+import argparse
+import time
+import sys
+import subprocess
 from pathlib import Path
-from datetime import datetime
-from typing import Dict, List, Optional
-from dataclasses import dataclass, asdict
-from openai import AsyncOpenAI
-from dotenv import load_dotenv
 
-load_dotenv()
+async def run_script_async(script_name, args_list):
+    cmd = ["python", script_name] + args_list
+    print(f"Starting: {' '.join(cmd)}")
+    
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
+    )
+    
+    stdout, stderr = await process.communicate()
+    
+    return {
+        "script": script_name,
+        "returncode": process.returncode,
+        "stdout": stdout.decode() if stdout else "",
+        "stderr": stderr.decode() if stderr else ""
+    }
 
-@dataclass
-class EvaluationMetrics:
-    chapter_num: int
-    baseline_score: float
-    final_score: float
-    professional_score: float = 100.0
-    total_improvement: float = 0.0  # final - baseline
-    flow_score: float = 0.0
-    character_voice_score: float = 0.0
-    clarity_score: float = 0.0
-    genre_score: float = 0.0
-    evaluator_comments: str = ""
-    evaluation_time: float = 0.0
-    timestamp: str = ""
-
-@dataclass
-class EvaluationConfig:
-    baseline_results_dir: str = "../results/baseline"
-    final_results_dir: str = "../results/final"
-    ground_truth_dir: str = "../data/chapters/ground_truth"
-    evaluation_output_dir: str = "../results/evaluation"
-    start_chapter: int = 1
-    end_chapter: int = 3
-    evaluator_model: str = "deepseek-chat"
-    temperature: float = 0.2  # Low temp for consistent scoring
-    max_tokens: int = 8192
-    base_url: str = "https://api.deepseek.com"
-    max_concurrent: int = 3
-    request_timeout: float = 300.0  # 5 minutes to prevent timeouts
-
-class AsyncEvaluator:
-    def __init__(self, config: EvaluationConfig, chapter_num: int):
-        self.config = config
-        self.chapter_num = chapter_num
-        self.client = AsyncOpenAI(
-            api_key=os.getenv("DEEPSEEK_API_KEY"),
-            base_url=self.config.base_url,
-            timeout=self.config.request_timeout
+def run_script_sync(script_name, args_list):
+    cmd = ["python", script_name] + args_list
+    print(f"Starting: {' '.join(cmd)}")
+    
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=False,  # Show output in real-time
+            text=True,
+            check=True
         )
-        self.setup_directories()
-        
-    def setup_directories(self):
-        Path(self.config.evaluation_output_dir).mkdir(exist_ok=True)
-        for subdir in ["scores", "comparisons", "analytics", "reports"]:
-            Path(self.config.evaluation_output_dir, subdir).mkdir(exist_ok=True)
-    
-    def load_translations(self) -> tuple[str, str, str]:
-        # Load baseline translation
-        baseline_file = Path(self.config.baseline_results_dir, "translations", f"chapter_{self.chapter_num:04d}_deepseek.txt")
-        if not baseline_file.exists():
-            raise FileNotFoundError(f"Baseline translation not found: {baseline_file}")
-        
-        with open(baseline_file, 'r', encoding='utf-8') as f:
-            baseline_text = f.read().strip()
-            if baseline_text.startswith("DeepSeek Translation"):
-                lines = baseline_text.split('\n')
-                baseline_text = '\n'.join(lines[2:]).strip()
-        
-        # Load final translation (rules + RAG)
-        final_file = Path(self.config.final_results_dir, "translations", f"chapter_{self.chapter_num:04d}_final.txt")
-        if not final_file.exists():
-            raise FileNotFoundError(f"Final translation not found: {final_file}")
-        
-        with open(final_file, 'r', encoding='utf-8') as f:
-            final_text = f.read().strip()
-            if final_text.startswith("Final Translation"):
-                lines = final_text.split('\n')
-                final_text = '\n'.join(lines[5:]).strip()
-        
-        # Load professional ground truth
-        truth_file = Path(self.config.ground_truth_dir, f"chapter_{self.chapter_num:04d}_en.txt")
-        if not truth_file.exists():
-            raise FileNotFoundError(f"Ground truth not found: {truth_file}")
-        
-        with open(truth_file, 'r', encoding='utf-8') as f:
-            ground_truth = f.read().strip()
-            lines = ground_truth.split('\n')
-            if lines[0].startswith("Chapter"):
-                ground_truth = '\n'.join(lines[3:]).strip()
-        
-        return baseline_text, final_text, ground_truth
-    
-    def create_evaluation_prompt(self, translation: str, ground_truth: str, translation_type: str) -> str:
-        """Create evaluation prompt for scoring translation quality"""
-        
-        prompt = f"""You are a Western reader who enjoys cultivation novels. Your job is to rate how much you'd enjoy reading this translation compared to the professional version.
-
-PROFESSIONAL REFERENCE (your 100% gold standard):
-{ground_truth}
-
-{translation_type.upper()} TRANSLATION (rate this version):
-{translation}
-
-Your Task: Rate this translation as a Western reader who wants to enjoy the story.
-
-What You Care About (as a Western cultivation novel reader):
-- Natural English Flow: Does it read smoothly like a real English novel?
-- Character Personality: Do characters feel real and consistent?  
-- Story Enjoyment: Can you follow the action and get invested?
-- Proper Cultivation Terms: Do terms like "Spiritual Strength" feel right?
-- Western Style: Written for Western readers colloquially, not literal translation
-
-Scoring Scale:
-- 95-100%: Perfect - reads like a professional English novel
-- 85-95%: Excellent - reads like professional English, would prefer this over many fan translations
-- 70-84%: Very good - smooth reading with minor artifacts, fully enjoyable
-- 55-69%: Good - readable with some awkward phrasing, but story flows well
-- 40-54%: Acceptable - clearly machine translated but understandable
-- 25-39%: Poor - heavy machine translation artifacts, difficult to follow story
-- 10-24%: Very poor - broken English, major comprehension issues
-- 0-9%: Unreadable - incomprehensible, completely failed translation
-
-Rate these aspects:
-1. Overall Enjoyment: How much would you enjoy this vs professional?
-2. Reading Flow: Does it read smoothly?
-3. Character Voice: Do characters feel real and consistent?
-4. Story Clarity: Can you follow what's happening?
-5. Genre Feel: Does it feel like a proper cultivation novel?
-
-Response Format:
-OVERALL: [score]%
-FLOW: [score]%
-CHARACTER: [score]%  
-CLARITY: [score]%
-GENRE: [score]%
-COMMENTS: [brief assessment about what works well or needs improvement for reader enjoyment]"""
-        
-        return prompt
-    
-    async def evaluate_translation_async(self, translation: str, ground_truth: str, translation_type: str) -> Dict:
-        start_time = time.time()
-        prompt = self.create_evaluation_prompt(translation, ground_truth, translation_type)
-        
-        try:
-            response = await self.client.chat.completions.create(
-                model=self.config.evaluator_model,
-                messages=[
-                    {"role": "system", "content": "You are an expert evaluator of English translations for Western readers. Rate translations objectively based on readability and enjoyment."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=self.config.temperature,
-                max_tokens=self.config.max_tokens
-            )
-            
-            evaluation_text = response.choices[0].message.content
-            evaluation_time = time.time() - start_time
-            
-            # Parse the evaluation
-            scores = self.parse_evaluation_response(evaluation_text)
-            scores["evaluation_time"] = evaluation_time
-            scores["raw_response"] = evaluation_text
-            
-            return scores
-            
-        except Exception as e:
-            print(f"Chapter {self.chapter_num}: Evaluation failed for {translation_type}: {str(e)}")
-            return {
-                "overall_score": 0,
-                "flow_score": 0,
-                "character_score": 0,
-                "clarity_score": 0,
-                "genre_score": 0,
-                "comments": f"Evaluation failed: {str(e)}",
-                "evaluation_time": 0,
-                "raw_response": ""
-            }
-    
-    def parse_evaluation_response(self, response_text: str) -> Dict:
-        scores = {
-            "overall_score": 0,
-            "flow_score": 0,
-            "character_score": 0,
-            "clarity_score": 0,
-            "genre_score": 0,
-            "comments": ""
+        return {
+            "script": script_name,
+            "returncode": 0,
+            "success": True
         }
-        
-        # Extract scores using regex
-        patterns = {
-            "overall_score": r"OVERALL:\s*(\d+)%",
-            "flow_score": r"FLOW:\s*(\d+)%",
-            "character_score": r"CHARACTER:\s*(\d+)%",
-            "clarity_score": r"CLARITY:\s*(\d+)%",
-            "genre_score": r"GENRE:\s*(\d+)%"
+    except subprocess.CalledProcessError as e:
+        return {
+            "script": script_name,
+            "returncode": e.returncode,
+            "success": False,
+            "error": str(e)
         }
-        
-        for score_name, pattern in patterns.items():
-            match = re.search(pattern, response_text, re.IGNORECASE)
-            if match:
-                scores[score_name] = int(match.group(1))
-        
-        # Extract comments
-        comments_match = re.search(r"COMMENTS:\s*(.+?)(?:\n\n|$)", response_text, re.DOTALL | re.IGNORECASE)
-        if comments_match:
-            scores["comments"] = comments_match.group(1).strip()
-        
-        return scores
-    
-    async def evaluate_chapter_async(self, semaphore: asyncio.Semaphore) -> Optional[EvaluationMetrics]:
-        async with semaphore:
-            print(f"Starting Chapter {self.chapter_num} evaluation...")
-            
-            try:
-                # Load baseline, final, and ground truth
-                baseline_text, final_text, ground_truth = self.load_translations()
-                print(f"Chapter {self.chapter_num}: Loaded baseline and final translations")
-                
-                # Evaluate baseline vs ground truth
-                print(f"Chapter {self.chapter_num}: Evaluating baseline...")
-                baseline_eval = await self.evaluate_translation_async(baseline_text, ground_truth, "baseline")
-                
-                # Evaluate final vs ground truth
-                print(f"Chapter {self.chapter_num}: Evaluating final...")
-                final_eval = await self.evaluate_translation_async(final_text, ground_truth, "final")
-                
-                # Calculate total improvement
-                total_improvement = final_eval["overall_score"] - baseline_eval["overall_score"]
-                
-                # Create metrics
-                metrics = EvaluationMetrics(
-                    chapter_num=self.chapter_num,
-                    baseline_score=baseline_eval["overall_score"],
-                    final_score=final_eval["overall_score"],
-                    total_improvement=total_improvement,
-                    flow_score=final_eval["flow_score"],
-                    character_voice_score=final_eval["character_score"],
-                    clarity_score=final_eval["clarity_score"],
-                    genre_score=final_eval["genre_score"],
-                    evaluator_comments=final_eval["comments"],
-                    evaluation_time=baseline_eval["evaluation_time"] + final_eval["evaluation_time"],
-                    timestamp=datetime.now().isoformat()
-                )
-                
-                # Save detailed results
-                self.save_evaluation(baseline_eval, final_eval, metrics, baseline_text, final_text, ground_truth)
-                
-                # Show completion
-                print(f"Chapter {self.chapter_num} complete:")
-                print(f"  Baseline: {baseline_eval['overall_score']}%")
-                print(f"  Final: {final_eval['overall_score']}%")
-                print(f"  Total improvement: {total_improvement:+.1f}")
-                
-                return metrics
-                
-            except Exception as e:
-                print(f"Chapter {self.chapter_num}: Error evaluating: {e}")
-                return None
-    
-    def save_evaluation(self, baseline_eval: Dict, final_eval: Dict, metrics: EvaluationMetrics, 
-                        baseline_text: str, final_text: str, ground_truth: str):
-        # Save scoring results
-        scores_file = Path(self.config.evaluation_output_dir, "scores", f"chapter_{self.chapter_num:04d}_scores.json")
-        scores_data = {
-            "chapter": self.chapter_num,
-            "professional_baseline": 100.0,
-            "baseline_evaluation": baseline_eval,
-            "final_evaluation": final_eval,
-            "total_improvement": final_eval["overall_score"] - baseline_eval["overall_score"],
-            "metrics": asdict(metrics),
-            "timestamp": datetime.now().isoformat()
-        }
-        
-        with open(scores_file, 'w', encoding='utf-8') as f:
-            json.dump(scores_data, f, indent=2, ensure_ascii=False)
-        
-        # Save side-by-side comparison
-        comparison_file = Path(self.config.evaluation_output_dir, "comparisons", f"chapter_{self.chapter_num:04d}_comparison.txt")
-        with open(comparison_file, 'w', encoding='utf-8') as f:
-            f.write(f"CHAPTER {self.chapter_num} BASELINE vs FINAL COMPARISON\n")
-            f.write("=" * 70 + "\n\n")
-            
-            f.write("PROFESSIONAL REFERENCE (100% baseline):\n")
-            f.write("-" * 50 + "\n")
-            f.write(ground_truth[:500] + "...\n\n")
-            
-            f.write(f"BASELINE TRANSLATION ({baseline_eval['overall_score']}%):\n")
-            f.write("-" * 50 + "\n") 
-            f.write(baseline_text[:500] + "...\n\n")
-            
-            f.write(f"FINAL TRANSLATION - Rules + RAG ({final_eval['overall_score']}%):\n")
-            f.write("-" * 50 + "\n")
-            f.write(final_text[:500] + "...\n\n")
-            
-            f.write("IMPROVEMENT ANALYSIS:\n")
-            f.write("-" * 50 + "\n")
-            f.write(f"Total improvement (Final vs Baseline): {final_eval['overall_score'] - baseline_eval['overall_score']:+.1f} points\n")
-            f.write(f"Final score breakdown:\n")
-            f.write(f"  Flow: {final_eval['flow_score']}%\n")
-            f.write(f"  Character Voice: {final_eval['character_score']}%\n")
-            f.write(f"  Clarity: {final_eval['clarity_score']}%\n")
-            f.write(f"  Genre Feel: {final_eval['genre_score']}%\n\n")
-            f.write(f"Evaluator Comments: {final_eval['comments']}\n")
 
-class AsyncEvaluationPipeline:
-    def __init__(self, config: EvaluationConfig):
-        self.config = config
-        self.setup_directories()
-        
-    def setup_directories(self):
-        Path(self.config.evaluation_output_dir).mkdir(exist_ok=True)
-        for subdir in ["scores", "comparisons", "analytics", "reports"]:
-            Path(self.config.evaluation_output_dir, subdir).mkdir(exist_ok=True)
+async def run_naive_evaluation_pipeline(start_chapter: int, end_chapter: int, concurrent: int = 3):
+    print("=" * 70)
+    print("STEP 6: NAIVE EVALUATION PIPELINE")
+    print("=" * 70)
+    print(f"Chapters: {start_chapter}-{end_chapter}")
+    print(f"Max concurrent: {concurrent}")
+    print()
+    print("This will:")
+    print("  6a. Generate naive translations (minimal prompt)")
+    print("  6b. Compare naive vs enhanced translations (step 5)")
+    print()
     
-    async def run_async_evaluation(self):
-        print("Starting Translation Evaluation Pipeline")
-        print(f"Evaluator Model: {self.config.evaluator_model}")
-        print(f"Max concurrent requests: {self.config.max_concurrent}")
-        print(f"Evaluating chapters {self.config.start_chapter}-{self.config.end_chapter}")
-        print(f"Comparing: Baseline vs Final vs Professional")
-        
-        start_time = time.time()
-        chapters = list(range(self.config.start_chapter, self.config.end_chapter + 1))
-        
-        # Create semaphore to limit concurrent requests
-        semaphore = asyncio.Semaphore(self.config.max_concurrent)
-        
-        # Create evaluators for each chapter
-        evaluators = [AsyncEvaluator(self.config, chapter_num) for chapter_num in chapters]
-        
-        # Create tasks for all chapters
-        tasks = [evaluator.evaluate_chapter_async(semaphore) for evaluator in evaluators]
-        
-        print(f"Launching {len(tasks)} concurrent evaluation tasks...")
-        
-        # Run all tasks concurrently
-        results_list = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # Process results
-        successful_metrics = []
-        failed_count = 0
-        
-        for i, result in enumerate(results_list):
-            chapter_num = chapters[i]
-            if isinstance(result, Exception):
-                print(f"Chapter {chapter_num} failed with exception: {result}")
-                failed_count += 1
-            elif result is not None:
-                successful_metrics.append(result)
-            else:
-                failed_count += 1
-        
-        evaluation_time = time.time() - start_time
-        print(f"Evaluation finished in {evaluation_time:.1f}s")
-        print(f"Successfully evaluated {len(successful_metrics)}/{len(chapters)} chapters")
-        
-        if failed_count > 0:
-            print(f"Failed chapters: {failed_count}")
-        
-        # Save analytics and generate report
-        print("Generating evaluation report...")
-        self.save_evaluation_report(successful_metrics)
-        
-        # Show final summary
-        if successful_metrics:
-            avg_baseline = sum(m.baseline_score for m in successful_metrics) / len(successful_metrics)
-            avg_final = sum(m.final_score for m in successful_metrics) / len(successful_metrics)
-            avg_total_improvement = sum(m.total_improvement for m in successful_metrics) / len(successful_metrics)
-            
-            print(f"\nPIPELINE RESULTS:")
-            print("=" * 50)
-            print(f"Average Baseline Score: {avg_baseline:.1f}%")
-            print(f"Average Final Score: {avg_final:.1f}%")
-            print(f"Total Average Improvement: {avg_total_improvement:+.1f} points")
-            
-            # Simple assessment
-            if avg_total_improvement > 5:
-                print(f"\nRESULT: Pipeline shows significant improvement")
-            elif avg_total_improvement > 2:
-                print(f"\nRESULT: Pipeline shows meaningful improvement")
-            else:
-                print(f"\nRESULT: Pipeline improvement is limited")
-        
-        return successful_metrics
+    start_time = time.time()
     
-    def save_evaluation_report(self, metrics: List[EvaluationMetrics]):
-        if not metrics:
-            print("No evaluation metrics to save")
-            return
-        
-        # Calculate statistics
-        baseline_scores = [m.baseline_score for m in metrics]
-        final_scores = [m.final_score for m in metrics]
-        total_improvements = [m.total_improvement for m in metrics]
-        
-        analytics = {
-            "evaluation_config": asdict(self.config),
-            "summary_statistics": {
-                "chapters_evaluated": len(metrics),
-                "evaluator_model": self.config.evaluator_model,
-                "evaluation_date": datetime.now().isoformat(),
-                
-                "baseline_performance": {
-                    "average_score": round(sum(baseline_scores) / len(baseline_scores), 2),
-                    "min_score": min(baseline_scores),
-                    "max_score": max(baseline_scores)
-                },
-                
-                "final_performance": {
-                    "average_score": round(sum(final_scores) / len(final_scores), 2),
-                    "min_score": min(final_scores),
-                    "max_score": max(final_scores)
-                },
-                
-                "improvement_analysis": {
-                    "avg_total_improvement": round(sum(total_improvements) / len(total_improvements), 2),
-                    "positive_impact": len([x for x in total_improvements if x > 0]),
-                    "negative_impact": len([x for x in total_improvements if x < 0]),
-                    "max_improvement": max(total_improvements),
-                    "min_improvement": min(total_improvements)
-                }
-            },
-            "detailed_metrics": [asdict(m) for m in metrics]
-        }
-        
-        # Save analytics JSON
-        analytics_file = Path(self.config.evaluation_output_dir, "analytics", "evaluation_analytics.json")
-        with open(analytics_file, 'w', encoding='utf-8') as f:
-            json.dump(analytics, f, indent=2, ensure_ascii=False)
-        
-        # Save human-readable report
-        report_file = Path(self.config.evaluation_output_dir, "reports", "evaluation_report.txt")
-        with open(report_file, 'w', encoding='utf-8') as f:
-            f.write("TRANSLATION PIPELINE EVALUATION REPORT\n")
-            f.write("=" * 60 + "\n\n")
-            f.write(f"Evaluation Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write(f"Evaluator Model: {self.config.evaluator_model}\n")
-            f.write(f"Chapters Evaluated: {len(metrics)}\n\n")
-            
-            f.write("PIPELINE PERFORMANCE:\n")
-            f.write("-" * 30 + "\n")
-            avg_baseline = sum(baseline_scores) / len(baseline_scores)
-            avg_final = sum(final_scores) / len(final_scores)
-            avg_total_improvement = sum(total_improvements) / len(total_improvements)
-            
-            f.write(f"Baseline Translation: {avg_baseline:.1f}%\n")
-            f.write(f"Final Translation (Rules + RAG): {avg_final:.1f}%\n")
-            f.write(f"Total Pipeline Improvement: {avg_total_improvement:+.1f} points\n\n")
-            
-            f.write("CHAPTER-BY-CHAPTER RESULTS:\n")
-            f.write("-" * 40 + "\n")
-            f.write("Ch# | Baseline | Final | Improvement\n")
-            f.write("-" * 35 + "\n")
-            for metric in metrics:
-                f.write(f"{metric.chapter_num:2d}  | ")
-                f.write(f"{metric.baseline_score:6.1f}%  | ")
-                f.write(f"{metric.final_score:5.1f}% | ")
-                f.write(f"{metric.total_improvement:+8.1f}\n")
-        
-        print(f"Evaluation analytics saved to: {analytics_file}")
-        print(f"Human-readable report saved to: {report_file}")
+    # Step 6a: Generate naive translations
+    print("=" * 50)
+    print("STEP 6a: NAIVE TRANSLATION")
+    print("=" * 50)
+    
+    step_6a_args = [
+        "--start", str(start_chapter),
+        "--end", str(end_chapter),
+        "--concurrent", str(concurrent)
+    ]
+    
+    step_6a_result = await run_script_async("6a_naive_translate.py", step_6a_args)
+    
+    if step_6a_result["returncode"] != 0:
+        print(f"Step 6a failed (exit code {step_6a_result['returncode']})")
+        if step_6a_result["stderr"]:
+            print(f"Error: {step_6a_result['stderr'][:500]}...")
+        return False
+    
+    print("Step 6a completed successfully")
+    
+    # Step 6b: Compare naive vs enhanced
+    print("\n" + "=" * 50)
+    print("STEP 6b: COMPARISON")
+    print("=" * 50)
+    
+    step_6b_args = [
+        "--start", str(start_chapter),
+        "--end", str(end_chapter)
+    ]
+    
+    # Run step 6b synchronously since it's just file processing
+    step_6b_result = run_script_sync("6b_compare_naive_enhanced.py", step_6b_args)
+    
+    if not step_6b_result.get("success"):
+        print(f"Step 6b failed (exit code {step_6b_result['returncode']})")
+        if step_6b_result.get("error"):
+            print(f"Error: {step_6b_result['error']}")
+        return False
+    
+    print("Step 6b completed successfully")
+    
+    # Final summary
+    total_time = time.time() - start_time
+    minutes = int(total_time // 60)
+    seconds = int(total_time % 60)
+    
+    print("\n" + "=" * 70)
+    print("NAIVE EVALUATION PIPELINE COMPLETE")
+    print("=" * 70)
+    print(f"Both steps completed successfully")
+    print(f"Total time: {minutes}m {seconds}s")
+    print(f"Chapters processed: {start_chapter}-{end_chapter}")
+    print()
+    print("Results available in:")
+    print(f"  Naive translations: ../results/naive/translations/")
+    print(f"  Comparisons: ../results/comparison/")
+    print(f"  Summary: ../results/comparison/comparison_summary.txt")
+    print()
+    print("Check the comparison files to see what your pipeline improved")
+    
+    return True
+
+def check_prerequisites(start_chapter: int, end_chapter: int):
+    
+    missing_files = []
+    
+    # Check Chinese chapters (needed for 6a)
+    for chapter in range(start_chapter, end_chapter + 1):
+        chinese_file = f"../data/chapters/clean/chapter_{chapter:04d}_cn.txt"
+        if not Path(chinese_file).exists():
+            missing_files.append(f"Chinese: {chinese_file}")
+    
+    # Check enhanced translations (needed for 6b)
+    for chapter in range(start_chapter, end_chapter + 1):
+        enhanced_file = f"../results/final/translations/chapter_{chapter:04d}_final.txt"
+        if not Path(enhanced_file).exists():
+            missing_files.append(f"Enhanced: {enhanced_file}")
+    
+    if missing_files:
+        print("❌ Prerequisites not met. Missing files:")
+        for file in missing_files[:10]:
+            print(f"     {file}")
+        if len(missing_files) > 10:
+            print(f"     ... and {len(missing_files) - 10} more")
+        print()
+        print("Please run:")
+        print("  • Step 5 (final translation) for enhanced translations")
+        print("  • Or check that Chinese chapter files exist")
+        return False
+    
+    return True
 
 def main():
-    parser = argparse.ArgumentParser(description="Translation Evaluation Pipeline")
-    parser.add_argument("--chapter", type=int, help="Evaluate single chapter")
-    parser.add_argument("--start", type=int, default=1, help="Start chapter")
-    parser.add_argument("--end", type=int, default=3, help="End chapter")
-    parser.add_argument("--concurrent", type=int, default=3, help="Max concurrent requests")
+    parser = argparse.ArgumentParser(description="Step 6: Naive Evaluation Pipeline (6a + 6b)")
+    parser.add_argument("--start", type=int, default=1, help="Start chapter number")
+    parser.add_argument("--end", type=int, default=3, help="End chapter number")
+    parser.add_argument("--concurrent", type=int, default=3, help="Max concurrent requests for step 6a")
     
     args = parser.parse_args()
     
-    config = EvaluationConfig(
-        start_chapter=args.start,
-        end_chapter=args.end,
-        max_concurrent=args.concurrent
-    )
+    # Validation
+    if args.start > args.end:
+        print("Error: Start chapter must be <= end chapter")
+        sys.exit(1)
     
-    # Check API key
+    if args.concurrent < 1 or args.concurrent > 10:
+        print("Error: Concurrent requests must be between 1 and 10")
+        sys.exit(1)
+    
+    # Check API key (needed for step 6a)
+    import os
+    from dotenv import load_dotenv
+    load_dotenv()
+    
     if not os.getenv("DEEPSEEK_API_KEY"):
         print("Error: DEEPSEEK_API_KEY not found in environment")
-        return
+        print("Step 6a requires API access for naive translation")
+        sys.exit(1)
     
-    # Check required directories
-    required_dirs = [
-        config.baseline_results_dir,
-        config.final_results_dir,
-        config.ground_truth_dir
-    ]
+    # Check prerequisites
+    if not check_prerequisites(args.start, args.end):
+        sys.exit(1)
     
-    missing_dirs = []
-    for dir_path in required_dirs:
-        if not Path(dir_path).exists():
-            missing_dirs.append(dir_path)
+    # Change to script directory
+    script_dir = Path(__file__).parent
+    import os
+    os.chdir(script_dir)
     
-    if missing_dirs:
-        print("Error: Required directories not found:")
-        for dir_path in missing_dirs:
-            print(f"  - {dir_path}")
-        print("\nPlease run the pipeline first:")
-        print("  1. python 1_baseline_translate.py")
-        print("  2-7. [rules and RAG pipeline]")
-        print("  7. python 7_final_translate.py")
-        return
+    print("Step 6 Configuration:")
+    print(f"  Chapters: {args.start}-{args.end}")
+    print(f"  Max concurrent (6a): {args.concurrent}")
+    print(f"  Model: deepseek-chat")
+    print(f"  Naive prompt: 'Translate this Chinese text to English prose:'")
+    print(f"  Comparison: Naive (6a) vs Enhanced (step 5)")
+    print()
     
-    if args.chapter:
-        # Single chapter mode
-        print(f"Evaluating single chapter: {args.chapter}")
-        async def single_chapter():
-            semaphore = asyncio.Semaphore(1)
-            evaluator = AsyncEvaluator(config, args.chapter)
-            result = await evaluator.evaluate_chapter_async(semaphore)
-            if result:
-                print(f"Chapter {args.chapter} evaluation complete")
-                print(f"  Baseline: {result.baseline_score}%")
-                print(f"  Final: {result.final_score}%")
-                print(f"  Total improvement: {result.total_improvement:+.1f}")
-            else:
-                print(f"Chapter {args.chapter} evaluation failed")
-        
-        asyncio.run(single_chapter())
-    else:
-        # Evaluate all chapters
-        print("Evaluation Configuration:")
-        print(f"  Evaluator Model: {config.evaluator_model}")
-        print(f"  Temperature: {config.temperature}")
-        print(f"  Max concurrent: {config.max_concurrent}")
-        print(f"  Chapters: {config.start_chapter}-{config.end_chapter}")
-        print(f"  Timeout: {config.request_timeout}s")
-        print(f"  Output Directory: {config.evaluation_output_dir}")
-        
-        pipeline = AsyncEvaluationPipeline(config)
-        asyncio.run(pipeline.run_async_evaluation())
+    # Run pipeline
+    success = asyncio.run(run_naive_evaluation_pipeline(args.start, args.end, args.concurrent))
+    
+    sys.exit(0 if success else 1)
 
 if __name__ == "__main__":
     main()
