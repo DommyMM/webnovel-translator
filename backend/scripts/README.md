@@ -84,14 +84,18 @@ python 5_final_translate.py [standard args] [--test] [--qwen] [--lite] [--debug]
 
 ---
 
-### 6. `6_evaluate.py` (Optional)
+### 6. `6_evaluate.py`
 ```bash
 python 6_evaluate.py [standard args]
 ```
-**Function**: AI-powered quality assessment  
-**Model**: DeepSeek V3 | **Processing**: Async  
-**Comparison**: Baseline vs Final vs Professional  
-**Output**: `../results/evaluation/reports/evaluation_report.txt`
+**Function**: Naive evaluation - compare minimal prompt vs enhanced pipeline  
+**Processing**: Sequential (6a async, 6b sync)  
+**Input**: Chinese chapters + enhanced translations (step 5)  
+**Output**: `../results/naive/` + `../results/comparison/`
+
+**Sub-steps**:
+- **6a**: `6a_naive_translate.py` - Generate naive translations with minimal prompt
+- **6b**: `6b_compare_naive_enhanced.py` - Compare naive vs enhanced side-by-side
 
 ---
 
@@ -102,6 +106,7 @@ python 6_evaluate.py [standard args]
 | 1 | `1_baseline_translate.py` | Async | Standard | deepseek-chat | tqdm progress |
 | 2a | `2a_extract_rules.py` | Async | Standard | deepseek-reasoner | - |
 | 5 | `5_final_translate.py` | Async | Standard + special | deepseek-chat | tqdm progress, RAG |
+| 6a | `6a_naive_translate.py` | Async | Standard | deepseek-chat | minimal prompt |
 
 ## Quick Start Commands
 
@@ -113,7 +118,7 @@ python 2_parallel_extraction.py --start 1 --end 3                   # Steps 2a +
 python 3_clean_rules.py --start 1 --end 3                           # Step 3
 python 4_build_chromadb.py --start 1 --end 3                        # Step 4 (uses BGE-M3 by default)
 python 5_final_translate.py --start 1 --end 3                       # Step 5 (uses BGE-M3 by default)
-python 6_evaluate.py --start 1 --end 3                              # Step 6 (optional)
+python 6_evaluate.py --start 1 --end 3                              # Step 6 (naive evaluation)
 
 ### Individual Steps
 ```bash
@@ -126,6 +131,10 @@ python 4_build_chromadb.py --qwen                       # Use Qwen3-8B embedding
 python 4_build_chromadb.py --lite                       # Use basic MPNet embeddings
 python 5_final_translate.py --qwen --start 1 --end 3    # Use Qwen3 RAG
 python 5_final_translate.py --lite --start 1 --end 3    # Use MPNet RAG
+
+# Run evaluation steps individually
+python 6a_naive_translate.py --start 1 --end 3 --concurrent 3
+python 6b_compare_naive_enhanced.py --start 1 --end 3
 ```
 
 ### Development/Testing
