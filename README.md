@@ -9,7 +9,7 @@ A self-improving Chinese-to-English translation pipeline designed for web novels
 - **Rule Application**: Applies learned style/structure patterns for consistent translation quality
 - **RAG Terminology**: ChromaDB vector database with BGE-M3 embeddings for cultivation term mappings via semantic search
 - **Semantic Chunking**: Two-level text splitting (lines → sentences) for focused term retrieval
-- **Evaluation Pipeline**: AI-powered quality assessment comparing baseline vs final translations
+- **Naive Evaluation**: Direct comparison between minimal prompt and enhanced pipeline results
 - **Async Processing**: Concurrent translation and evaluation across multiple chapters
 
 **Performance**: ~90s translation time per chapter with rules + RAG terminology application
@@ -31,8 +31,8 @@ Chinese Input
 4. ChromaDB RAG Database (BGE-M3 Embeddings)
     ↓ (Semantic Chunking + Rules + RAG Application)
 5. Final Enhanced Translation 
-    ↓ (AI Quality Evaluation - Optional)
-6. Quality Improvement Metrics
+    ↓ (Naive Evaluation)
+6. Compare Minimal Prompt vs Enhanced Pipeline
 ```
 
 ### **Example Translation Flow**
@@ -62,7 +62,13 @@ terminology_diffs = {
 "Long Chen broke through to the Qi Condensation realm and became the Pill God's successor"
 ```
 
-**Result:** Perfect terminology consistency with natural English flow
+**Step 6 - Naive Evaluation:**
+```
+Naive (minimal prompt): "Long Chen broke through to the gathering realm and became the Dan Emperor's heir"
+Enhanced (rules + RAG): "Long Chen broke through to the Qi Condensation realm and became the Pill God's successor"
+
+Improvement: Consistent terminology + natural flow
+```
 
 ---
 
@@ -90,14 +96,17 @@ terminology_diffs = {
 │   ├── 3_clean_rules.py             # AI-powered rule refinement
 │   ├── 4_build_chromadb.py          # Build ChromaDB vector database
 │   ├── 5_final_translate.py         # Final Rules + RAG translation
-│   ├── 6_evaluate.py                # Quality assessment pipeline (optional)
+│   ├── 6_evaluate.py                # Naive evaluation coordinator
+│   ├── 6a_naive_translate.py        # Generate naive translations
+│   ├── 6b_compare_naive_enhanced.py # Compare naive vs enhanced
 │   └── scrape/                      # Data collection tools
 ├── debug/
 │   └── prompts/                     # Debug prompts (with --debug flag)
 └── results/
     ├── baseline/                    # Initial translation results
     ├── final/                       # Rules + RAG translation results
-    └── evaluation/                  # Comparative analysis
+    ├── naive/                       # Minimal prompt translations
+    └── comparison/                  # Naive vs enhanced comparisons
 ```
 
 ## Streamlined Workflow (6 Steps)
@@ -154,9 +163,9 @@ python scripts/5_final_translate.py --test
 python scripts/5_final_translate.py --start 1 --end 1 --dry-run --debug
 ```
 
-### 6. Quality Evaluation (Optional)
+### 6. Naive Evaluation
 ```bash
-# Comprehensive quality assessment
+# Compare minimal prompt vs enhanced pipeline
 python scripts/6_evaluate.py --start 1 --end 10 --concurrent 3
 ```
 
@@ -200,10 +209,19 @@ terminology = {doc: metadata['english_term'] for doc, metadata, distance in resu
                if (1.0 - distance) >= 0.15}
 ```
 
+### **4. Honest Naive Evaluation**
+```python
+# Compare against truly minimal prompt, not professional human translations
+naive_prompt = "Translate this Chinese text to English prose:"
+enhanced_result = rules_plus_rag_translation(chinese_text)
+# Shows what your pipeline actually adds over raw ChatGPT
+comparison = side_by_side_analysis(naive_result, enhanced_result)
+```
+
 ## Tech Stack
 
 ### **APIs & Models**
-- **DeepSeek V3**: Translation engine + rule extraction + evaluation
+- **DeepSeek V3**: Translation engine + rule extraction + naive evaluation
 - **Cerebras Qwen-3-32B**: Rule cleaning + terminology extraction
 - **ChromaDB**: Vector database for terminology RAG
 - **BGE-M3 Embeddings**: Multilingual embeddings for semantic search (default)
@@ -223,21 +241,21 @@ terminology = {doc: metadata['english_term'] for doc, metadata, distance in resu
 ```
 Chinese: 龙尘看着那个丹帝传承，心中涌起一股聚气三重天的力量
 
-Baseline Translation:
-"Long Chen looked at the Alchemy Emperor's inheritance, feeling Qi Gathering third level power surge in his heart"
+Naive Translation (minimal prompt):
+"Long Chen looked at the Dan Emperor's inheritance, feeling Qi Gathering third heaven power surge in his heart"
 
-Final (Rules + RAG):
+Enhanced (Rules + RAG):
 "Long Chen gazed at the Pill God's inheritance, feeling third Heavenstage of Qi Condensation power surge through him"
 
 Improvements:
-- "Alchemy Emperor" → "Pill God" (RAG terminology via semantic search)
+- "Dan Emperor" → "Pill God" (RAG terminology via semantic search)
 - "looked at" → "gazed at" (style rules)  
-- "Qi Gathering third level" → "third Heavenstage of Qi Condensation" (RAG precision)
+- "Qi Gathering third heaven" → "third Heavenstage of Qi Condensation" (RAG precision)
 - "in his heart" → "through him" (natural flow from rules)
 ```
 
 ### System Performance
-- **Speed**: ~90s per chapter (Rules + RAG), ~30s baseline
+- **Speed**: ~90s per chapter (Rules + RAG), ~30s naive
 - **Real-time Progress**: Live token streaming with multi-chapter progress bars
 - **Terminology**: BGE-M3 semantic search with 0.15 threshold captures context-diluted terms
 - **Scalability**: Async processing handles 10+ chapters concurrently
@@ -271,6 +289,11 @@ Result: "Am I the peerless Pill God who looks down on the world—Long Chen?"
 - **Consistency**: Never forgets established terminology or style rules
 - **Cost**: $0.004/chapter vs significantly higher human costs
 
+### Honest Evaluation
+- **Realistic Baseline**: Compares against minimal prompt, not professional translations
+- **Clear Value**: Shows exactly what pipeline adds over "just ask ChatGPT"
+- **Measurable**: Direct metrics (terminology consistency, flow improvements, length ratios)
+
 ## Quick Start
 
 ```bash
@@ -284,7 +307,7 @@ python scripts/2_parallel_extraction.py --start 1 --end 3 --concurrent 3
 python scripts/3_clean_rules.py
 python scripts/4_build_chromadb.py  # Uses BGE-M3 by default
 python scripts/5_final_translate.py --start 1 --end 3 --concurrent 3        # Uses BGE-M3
-python scripts/6_evaluate.py --start 1 --end 3 --concurrent 3               # Optional
+python scripts/6_evaluate.py --start 1 --end 3 --concurrent 3               # Naive evaluation
 
 # 3. Test RAG system
 python scripts/5_final_translate.py --test
@@ -293,7 +316,7 @@ python scripts/5_final_translate.py --test
 python scripts/5_final_translate.py --start 1 --end 1 --dry-run --debug
 
 # 5. Check results
-cat results/evaluation/reports/evaluation_report.txt
+cat results/comparison/comparison_summary.txt
 ```
 
 ## Advanced Usage
@@ -309,8 +332,12 @@ python scripts/5_final_translate.py --lite --start 1 --end 3    # Use MPNet RAG
 # Run individual extraction steps if needed
 python scripts/2a_extract_rules.py --start 1 --end 3 --concurrent 3
 python scripts/2b_extract_terminology.py --start 1 --end 3 --concurrent 2
+
+# Run evaluation steps individually
+python scripts/6a_naive_translate.py --start 1 --end 3 --concurrent 3
+python scripts/6b_compare_naive_enhanced.py --start 1 --end 3
 ```
 
 ---
 
-*A hybrid translation system combining learned style rules with BGE-M3 vector RAG and semantic chunking for domain-specific terminology, creating translations that maintain both technical accuracy and natural flow.*
+*A hybrid translation system combining learned style rules with BGE-M3 vector RAG and semantic chunking for domain-specific terminology, with honest evaluation comparing enhanced pipeline against minimal baseline prompts.*
