@@ -58,6 +58,7 @@ async def run_naive_evaluation_pipeline(start_chapter: int, end_chapter: int, co
     print("This will:")
     print("  6a. Generate naive translations (minimal prompt)")
     print("  6b. Compare naive vs enhanced translations (step 5)")
+    print("  6c. LLM judgment: which translation is better")
     print()
     
     start_time = time.time()
@@ -73,7 +74,7 @@ async def run_naive_evaluation_pipeline(start_chapter: int, end_chapter: int, co
         "--concurrent", str(concurrent)
     ]
     
-    step_6a_result = await run_script_async("6a_naive_translate.py", step_6a_args)
+    step_6a_result = await run_script_async("6a_naive.py", step_6a_args)
     
     if step_6a_result["returncode"] != 0:
         print(f"Step 6a failed (exit code {step_6a_result['returncode']})")
@@ -94,7 +95,7 @@ async def run_naive_evaluation_pipeline(start_chapter: int, end_chapter: int, co
     ]
     
     # Run step 6b synchronously since it's just file processing
-    step_6b_result = run_script_sync("6b_compare_naive_enhanced.py", step_6b_args)
+    step_6b_result = run_script_sync("6b_compare.py", step_6b_args)
     
     if not step_6b_result.get("success"):
         print(f"Step 6b failed (exit code {step_6b_result['returncode']})")
@@ -104,6 +105,27 @@ async def run_naive_evaluation_pipeline(start_chapter: int, end_chapter: int, co
     
     print("Step 6b completed successfully")
     
+    # Step 6c: LLM judgment
+    print("\n" + "=" * 50)
+    print("STEP 6c: LLM JUDGMENT")
+    print("=" * 50)
+    
+    step_6c_args = [
+        "--start", str(start_chapter),
+        "--end", str(end_chapter),
+        "--concurrent", str(concurrent)
+    ]
+    
+    step_6c_result = await run_script_async("6c_judge.py", step_6c_args)
+    
+    if step_6c_result["returncode"] != 0:
+        print(f"Step 6c failed (exit code {step_6c_result['returncode']})")
+        if step_6c_result["stderr"]:
+            print(f"Error: {step_6c_result['stderr'][:500]}...")
+        return False
+    
+    print("Step 6c completed successfully")
+    
     # Final summary
     total_time = time.time() - start_time
     minutes = int(total_time // 60)
@@ -112,7 +134,7 @@ async def run_naive_evaluation_pipeline(start_chapter: int, end_chapter: int, co
     print("\n" + "=" * 70)
     print("NAIVE EVALUATION PIPELINE COMPLETE")
     print("=" * 70)
-    print(f"Both steps completed successfully")
+    print(f"All steps completed successfully (6a + 6b + 6c)")
     print(f"Total time: {minutes}m {seconds}s")
     print(f"Chapters processed: {start_chapter}-{end_chapter}")
     print()
@@ -120,8 +142,10 @@ async def run_naive_evaluation_pipeline(start_chapter: int, end_chapter: int, co
     print(f"  Naive translations: ../results/naive/translations/")
     print(f"  Comparisons: ../results/comparison/")
     print(f"  Summary: ../results/comparison/comparison_summary.txt")
+    print(f"  LLM judgments: ../results/evaluation/")
+    print(f"  Judgment summary: ../results/evaluation/llm_judgment_summary.txt")
     print()
-    print("Check the comparison files to see what your pipeline improved")
+    print("Check the LLM judgment to see which translation the AI prefers!")
     
     return True
 
@@ -135,7 +159,7 @@ def check_prerequisites(start_chapter: int, end_chapter: int):
         if not Path(chinese_file).exists():
             missing_files.append(f"Chinese: {chinese_file}")
     
-    # Check enhanced translations (needed for 6b)
+    # Check enhanced translations (needed for 6b and 6c)
     for chapter in range(start_chapter, end_chapter + 1):
         enhanced_file = f"../results/final/translations/chapter_{chapter:04d}_final.txt"
         if not Path(enhanced_file).exists():
@@ -153,13 +177,23 @@ def check_prerequisites(start_chapter: int, end_chapter: int):
         print("  • Or check that Chinese chapter files exist")
         return False
     
+    # Check Cerebras API (needed for step 6c)
+    import os
+    from dotenv import load_dotenv
+    load_dotenv()
+    
+    if not os.getenv("CEREBRAS_API_KEY"):
+        print("❌ CEREBRAS_API_KEY not found in environment")
+        print("Step 6c requires Cerebras API access for LLM judgment")
+        return False
+    
     return True
 
 def main():
-    parser = argparse.ArgumentParser(description="Step 6: Naive Evaluation Pipeline (6a + 6b)")
+    parser = argparse.ArgumentParser(description="Step 6: Naive Evaluation Pipeline (6a + 6b + 6c)")
     parser.add_argument("--start", type=int, default=1, help="Start chapter number")
     parser.add_argument("--end", type=int, default=3, help="End chapter number")
-    parser.add_argument("--concurrent", type=int, default=3, help="Max concurrent requests for step 6a")
+    parser.add_argument("--concurrent", type=int, default=3, help="Max concurrent requests for step 6a and 6c")
     
     args = parser.parse_args()
     
@@ -172,7 +206,7 @@ def main():
         print("Error: Concurrent requests must be between 1 and 10")
         sys.exit(1)
     
-    # Check API key (needed for step 6a)
+    # Check API keys (needed for steps 6a and 6c)
     import os
     from dotenv import load_dotenv
     load_dotenv()
@@ -193,10 +227,12 @@ def main():
     
     print("Step 6 Configuration:")
     print(f"  Chapters: {args.start}-{args.end}")
-    print(f"  Max concurrent (6a): {args.concurrent}")
-    print(f"  Model: deepseek-chat")
+    print(f"  Max concurrent (6a/6c): {args.concurrent}")
+    print(f"  6a Model: deepseek-chat")
+    print(f"  6c Model: qwen-3-32b (Cerebras)")
     print(f"  Naive prompt: 'Translate this Chinese text to English prose:'")
     print(f"  Comparison: Naive (6a) vs Enhanced (step 5)")
+    print(f"  LLM judgment: Head-to-head quality assessment")
     print()
     
     # Run pipeline
